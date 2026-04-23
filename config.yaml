@@ -32,6 +32,9 @@ data:
     - USDC
     - FDUSD
     - BUSD
+  cache_max_staleness_seconds: 900
+  provider_max_retries: 1
+  retry_backoff_seconds: 0.5
 
 risk:
   max_per_trade_risk_fraction: 0.01
@@ -81,3 +84,8 @@ persistence:
 logging:
   level: INFO
   json_output: true
+
+auth:
+  enabled: false
+  realm: Pepper Operator Console
+  operators: []

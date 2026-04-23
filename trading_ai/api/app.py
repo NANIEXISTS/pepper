@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
@@ -15,6 +15,7 @@ from ..agents import AgentContext
 from ..core.enums import TradeSignal, TradingMode
 from ..core.models import MarketDataRequest, OrderIntent, PortfolioSnapshot
 from ..data import MarketDataService, build_market_data_provider
+from ..data.exceptions import MarketDataUnavailableError
 from ..execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
 from ..features import FeatureEngineer
 from ..llm import LLMClient
@@ -25,6 +26,7 @@ from ..portfolio import PortfolioService
 from ..reinforcement import ExecutionTimingCoordinator
 from ..risk import RiskAuditAgent
 from ..settings import get_settings
+from .security import AuthenticatedOperator, build_operator_auth
 
 
 def create_app() -> FastAPI:
@@ -32,7 +34,10 @@ def create_app() -> FastAPI:
     configure_logging(settings.logging.level)
 
     audit_store = TradeAuditStore.from_database_url(settings.persistence.database_url)
-    market_data_service = MarketDataService(build_market_data_provider(settings.data, settings.exchange))
+    market_data_service = MarketDataService(
+        build_market_data_provider(settings.data, settings.exchange),
+        cache_max_staleness_seconds=settings.data.cache_max_staleness_seconds,
+    )
     feature_engineer = FeatureEngineer()
     leakage_analyzer = FeatureLeakageAnalyzer()
     backtest_engine = BacktestEngine(settings.backtesting)
@@ -65,6 +70,7 @@ def create_app() -> FastAPI:
         audit_store=audit_store,
         alert_service=alert_service,
     )
+    auth = build_operator_auth(settings.auth, audit_store)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -89,6 +95,7 @@ def create_app() -> FastAPI:
     app.state.alert_service = alert_service
     app.state.paper_trading_service = paper_trading_service
     app.state.paper_scheduler = paper_scheduler
+    app.state.auth_enabled = settings.auth.enabled
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
     app.mount("/assets", StaticFiles(directory=dashboard_dir), name="dashboard-assets")
@@ -98,6 +105,47 @@ def create_app() -> FastAPI:
             settings.data.default_lookback_bars,
             settings.backtesting.train_bars + (settings.backtesting.test_bars * settings.backtesting.max_walk_forward_windows),
             settings.backtesting.trend_filter_window + 50,
+        )
+
+    async def _fetch_market_frame(
+        request: MarketDataRequest,
+        *,
+        require_fresh: bool = False,
+        action_name: str = "market data fetch",
+    ):
+        try:
+            frame = await market_data_service.fetch_dataframe(request)
+        except MarketDataUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        if require_fresh and frame.attrs.get("stale", False):
+            cache_age_seconds = float(frame.attrs.get("cache_age_seconds", 0.0))
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"{action_name} requires fresh market data for {request.symbol} {request.timeframe}. "
+                    f"Last good snapshot age: {cache_age_seconds:.1f}s."
+                ),
+            )
+        return frame
+
+    async def _record_operator_action(
+        operator: AuthenticatedOperator,
+        *,
+        action: str,
+        resource: str,
+        outcome: str,
+        details: dict | None = None,
+    ) -> None:
+        if not settings.auth.enabled:
+            return
+        await audit_store.record_operator_action(
+            username=operator.username,
+            role=operator.role,
+            action=action,
+            resource=resource,
+            outcome=outcome,
+            details=details,
         )
 
     async def _price_map_for_portfolio(*, symbol: str, timeframe: str, latest_price: float) -> dict[str, float]:
@@ -115,14 +163,19 @@ def create_app() -> FastAPI:
             tasks.append((tracked_symbol, asyncio.create_task(market_data_service.fetch_dataframe(request))))
 
         for tracked_symbol, task in tasks:
-            frame = await task
+            try:
+                frame = await task
+            except Exception:
+                continue
+            if frame.attrs.get("stale", False):
+                continue
             price_map[tracked_symbol] = float(frame.iloc[-1]["close"])
 
         return price_map
 
     async def _run_backtest_summary(symbol: str, timeframe: str, lookback_bars: int) -> dict:
         request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
-        raw_frame = await market_data_service.fetch_dataframe(request)
+        raw_frame = await _fetch_market_frame(request, action_name="Backtest")
         try:
             leakage_check = leakage_analyzer.assert_no_lookahead(raw_frame, feature_engineer)
         except LookAheadBiasError as exc:
@@ -158,7 +211,7 @@ def create_app() -> FastAPI:
         return RedirectResponse(url="/dashboard")
 
     @app.get("/dashboard", include_in_schema=False)
-    async def dashboard() -> FileResponse:
+    async def dashboard(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> FileResponse:
         return FileResponse(dashboard_dir / "index.html")
 
     @app.get("/dashboard/data")
@@ -166,6 +219,7 @@ def create_app() -> FastAPI:
         symbol: str | None = None,
         timeframe: str | None = None,
         lookback_bars: int | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
     ) -> dict:
         active_symbol = symbol or settings.default_symbol
         active_timeframe = timeframe or settings.paper_trading.default_cycle_timeframe
@@ -174,7 +228,7 @@ def create_app() -> FastAPI:
             timeframe=active_timeframe,
             lookback_bars=lookback_bars or max(settings.paper_trading.default_lookback_bars, settings.data.default_lookback_bars),
         )
-        market_frame = await market_data_service.fetch_dataframe(request)
+        market_frame = await _fetch_market_frame(request, action_name="Dashboard refresh")
         enriched = feature_engineer.enrich(market_frame)
         recent_market = [
             {
@@ -230,6 +284,9 @@ def create_app() -> FastAPI:
                 "provider": market_frame.attrs.get("provider"),
                 "source_timeframe": market_frame.attrs.get("source_timeframe"),
                 "gap_count": market_frame.attrs.get("gap_count", 0),
+                "stale": market_frame.attrs.get("stale", False),
+                "cache_age_seconds": market_frame.attrs.get("cache_age_seconds", 0.0),
+                "provider_failures": market_frame.attrs.get("provider_failures", []),
                 "latest_timestamp": market_frame.index[-1].isoformat(),
                 "latest_price": float(market_frame.iloc[-1]["close"]),
                 "recent_bars": recent_market,
@@ -257,8 +314,16 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "mode": settings.app_mode.value}
 
+    @app.get("/auth/session")
+    async def auth_session(operator: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
+        return {
+            "auth_enabled": settings.auth.enabled,
+            "username": operator.username,
+            "role": operator.role,
+        }
+
     @app.get("/config")
-    async def config_summary() -> dict:
+    async def config_summary(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
         return {
             "app_name": settings.app_name,
             "mode": settings.app_mode.value,
@@ -269,35 +334,49 @@ def create_app() -> FastAPI:
             "exchange_id": settings.exchange.exchange_id,
             "paper_trading_timeframe": settings.paper_trading.default_cycle_timeframe,
             "live_trading_enabled": settings.execution.live_trading_enabled,
+            "auth_enabled": settings.auth.enabled,
         }
 
     @app.get("/market-data/{symbol}")
-    async def market_data(symbol: str, timeframe: str = "1d", lookback_bars: int | None = None) -> dict:
+    async def market_data(
+        symbol: str,
+        timeframe: str = "1d",
+        lookback_bars: int | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
         request = MarketDataRequest(
             symbol=symbol,
             timeframe=timeframe,
             lookback_bars=lookback_bars or settings.data.default_lookback_bars,
         )
-        frame = await market_data_service.fetch_dataframe(request)
+        frame = await _fetch_market_frame(request, action_name="Market data preview")
         return {
             "symbol": symbol,
             "timeframe": timeframe,
             "provider": frame.attrs.get("provider"),
             "source_timeframe": frame.attrs.get("source_timeframe"),
             "gap_count": frame.attrs.get("gap_count", 0),
+            "stale": frame.attrs.get("stale", False),
+            "cache_age_seconds": frame.attrs.get("cache_age_seconds", 0.0),
+            "provider_failures": frame.attrs.get("provider_failures", []),
             "rows": len(frame),
             "columns": list(frame.columns),
             "latest": frame.tail(1).reset_index().to_dict(orient="records"),
         }
 
     @app.get("/features/{symbol}")
-    async def features(symbol: str, timeframe: str = "1d", lookback_bars: int | None = None) -> dict:
+    async def features(
+        symbol: str,
+        timeframe: str = "1d",
+        lookback_bars: int | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
         request = MarketDataRequest(
             symbol=symbol,
             timeframe=timeframe,
             lookback_bars=lookback_bars or settings.data.default_lookback_bars,
         )
-        frame = await market_data_service.fetch_dataframe(request)
+        frame = await _fetch_market_frame(request, action_name="Feature preview")
         enriched = feature_engineer.enrich(frame)
         latest = enriched.tail(1).reset_index().to_dict(orient="records")
         return {
@@ -308,7 +387,12 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/backtests/ema/{symbol}")
-    async def ema_backtest(symbol: str, timeframe: str = "1d", lookback_bars: int | None = None) -> dict:
+    async def ema_backtest(
+        symbol: str,
+        timeframe: str = "1d",
+        lookback_bars: int | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
         minimum_lookback = _backtest_lookback_bars()
         result = await _run_backtest_summary(
             symbol=symbol,
@@ -318,56 +402,105 @@ def create_app() -> FastAPI:
         return {"symbol": symbol, "timeframe": timeframe, **result}
 
     @app.get("/portfolio")
-    async def portfolio() -> dict:
+    async def portfolio(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
         view = portfolio_service.mark_to_market({})
         return view.model_dump(mode="json")
 
     @app.get("/alerts")
-    async def alerts(limit: int = 20) -> dict:
+    async def alerts(limit: int = 20, _: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
         records = [record.model_dump(mode="json") for record in alert_service.list_recent(limit=limit)]
         return {"alerts": records}
 
     @app.get("/audit/trades")
-    async def trade_audit(limit: int = 20) -> dict:
+    async def trade_audit(limit: int = 20, _: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
         events = [event.model_dump(mode="json") for event in await audit_store.list_trade_events(limit=limit)]
         return {"events": events}
 
+    @app.get("/audit/operators")
+    async def operator_audit(limit: int = 20, _: AuthenticatedOperator = Depends(auth.require_admin)) -> dict:
+        events = [event.model_dump(mode="json") for event in await audit_store.list_operator_actions(limit=limit)]
+        return {"events": events}
+
     @app.get("/paper/jobs")
-    async def paper_jobs() -> dict:
+    async def paper_jobs(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
         jobs = [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()]
         return {"jobs": jobs}
 
     @app.post("/paper/jobs")
-    async def create_paper_job(payload: PaperCycleJobCreate) -> dict:
+    async def create_paper_job(
+        payload: PaperCycleJobCreate,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         job = await paper_scheduler.create_job(payload)
+        await _record_operator_action(
+            operator,
+            action="create_paper_job",
+            resource=f"{payload.symbol}:{payload.timeframe}",
+            outcome="success",
+            details={"interval_seconds": payload.interval_seconds, "auto_start": payload.auto_start},
+        )
         return {"job": job.model_dump(mode="json")}
 
     @app.post("/paper/jobs/{job_id}/start")
-    async def start_paper_job(job_id: int) -> dict:
+    async def start_paper_job(
+        job_id: int,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         job = await paper_scheduler.start_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Paper cycle job {job_id} not found.")
+        await _record_operator_action(
+            operator,
+            action="start_paper_job",
+            resource=str(job_id),
+            outcome="success",
+        )
         return {"job": job.model_dump(mode="json")}
 
     @app.post("/paper/jobs/{job_id}/pause")
-    async def pause_paper_job(job_id: int) -> dict:
+    async def pause_paper_job(
+        job_id: int,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         job = await paper_scheduler.pause_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Paper cycle job {job_id} not found.")
+        await _record_operator_action(
+            operator,
+            action="pause_paper_job",
+            resource=str(job_id),
+            outcome="success",
+        )
         return {"job": job.model_dump(mode="json")}
 
     @app.post("/paper/jobs/{job_id}/run")
-    async def run_paper_job_once(job_id: int) -> dict:
+    async def run_paper_job_once(
+        job_id: int,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         try:
             cycle = await paper_scheduler.run_job_once(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except MarketDataUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await _record_operator_action(
+            operator,
+            action="run_paper_job_once",
+            resource=str(job_id),
+            outcome="success",
+            details={"symbol": cycle.symbol, "execution_status": cycle.execution_report.status.value if cycle.execution_report else "none"},
+        )
         return cycle.model_dump(mode="json")
 
     @app.get("/paper/runs")
-    async def paper_runs(limit: int = 20, job_id: int | None = None) -> dict:
+    async def paper_runs(
+        limit: int = 20,
+        job_id: int | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
         runs = [run.model_dump(mode="json") for run in await paper_scheduler.list_runs(limit=limit, job_id=job_id)]
         return {"runs": runs}
 
@@ -376,6 +509,7 @@ def create_app() -> FastAPI:
         symbol: str,
         timeframe: str | None = None,
         lookback_bars: int | None = None,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
     ) -> dict:
         try:
             cycle = await paper_scheduler.run_ad_hoc_cycle(
@@ -383,12 +517,24 @@ def create_app() -> FastAPI:
                 timeframe=timeframe or settings.paper_trading.default_cycle_timeframe,
                 lookback_bars=lookback_bars or settings.paper_trading.default_lookback_bars,
             )
+        except MarketDataUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await _record_operator_action(
+            operator,
+            action="run_paper_cycle",
+            resource=f"{symbol}:{timeframe or settings.paper_trading.default_cycle_timeframe}",
+            outcome="success",
+            details={"execution_status": cycle.execution_report.status.value if cycle.execution_report else "none"},
+        )
         return cycle.model_dump(mode="json")
 
     @app.post("/paper/orders/manual")
-    async def manual_paper_order(payload: ManualPaperOrderRequest) -> dict:
+    async def manual_paper_order(
+        payload: ManualPaperOrderRequest,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         if settings.app_mode != TradingMode.PAPER:
             raise HTTPException(status_code=409, detail="Manual paper orders are disabled in live mode.")
 
@@ -397,7 +543,7 @@ def create_app() -> FastAPI:
             timeframe=payload.timeframe,
             lookback_bars=payload.lookback_bars,
         )
-        frame = await market_data_service.fetch_dataframe(request)
+        frame = await _fetch_market_frame(request, require_fresh=True, action_name="Manual paper order")
         latest_price = float(frame.iloc[-1]["close"])
         price_map = await _price_map_for_portfolio(
             symbol=payload.symbol,
@@ -418,7 +564,7 @@ def create_app() -> FastAPI:
             stop_loss_price=payload.stop_loss_price,
             take_profit_price=payload.take_profit_price,
             order_type=payload.order_type,
-            metadata={"source": "operator-dashboard"},
+            metadata={"source": "operator-dashboard", "operator_username": operator.username},
         )
         signal = TradeSignal.BUY if payload.side.value == "buy" else TradeSignal.SELL
         report = await execution_engine.place_order(
@@ -428,11 +574,18 @@ def create_app() -> FastAPI:
             rationale=payload.rationale,
             order=order,
             portfolio=portfolio_service.snapshot(price_map),
-            metadata={"source": "operator-dashboard", "timeframe": payload.timeframe},
+            metadata={"source": "operator-dashboard", "timeframe": payload.timeframe, "operator_username": operator.username},
         )
         if report.status.value == "filled":
             portfolio_service.apply_fill(order, report)
             await audit_store.save_portfolio_state(portfolio_service.export_state())
+        await _record_operator_action(
+            operator,
+            action="manual_paper_order",
+            resource=payload.symbol,
+            outcome=report.status.value,
+            details={"side": payload.side.value, "quantity": payload.quantity, "timeframe": payload.timeframe},
+        )
         return {
             "order": order.model_dump(mode="json"),
             "report": report.model_dump(mode="json"),
@@ -440,7 +593,10 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/orders/paper")
-    async def paper_order(payload: dict) -> dict:
+    async def paper_order(
+        payload: dict,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
         if settings.app_mode != TradingMode.PAPER:
             raise HTTPException(status_code=409, detail="Paper order endpoint is disabled in live mode.")
 
@@ -458,6 +614,13 @@ def create_app() -> FastAPI:
             order=order,
             portfolio=portfolio,
             metadata=payload.get("metadata", {}),
+        )
+        await _record_operator_action(
+            operator,
+            action="paper_order_api",
+            resource=order.symbol,
+            outcome=report.status.value,
+            details={"agent_name": payload.get("agent_name", "manual")},
         )
         return report.model_dump(mode="json")
 

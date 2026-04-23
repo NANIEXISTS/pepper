@@ -125,3 +125,40 @@ def test_manual_paper_order_updates_portfolio_and_audit(monkeypatch, tmp_path: P
         assert dashboard_response.status_code == 200
         dashboard_payload = dashboard_response.json()
         assert len(dashboard_payload["trade_audit"]) == 1
+
+
+def test_manual_paper_order_rejects_stale_market_data(monkeypatch, tmp_path: Path) -> None:
+    from trading_ai.api import app as app_module
+    from trading_ai.data.service import MarketDataService
+
+    settings = TradingSettings(
+        app_mode=TradingMode.PAPER,
+        persistence=PersistenceSettings(database_url=f"sqlite+aiosqlite:///{(tmp_path / 'manual-order-stale.db').as_posix()}"),
+        execution=ExecutionSettings(),
+        backtesting=BacktestingSettings(train_bars=200, test_bars=80, max_walk_forward_windows=3),
+        logging=LoggingSettings(level="INFO"),
+    )
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+
+    async def stale_fetch_dataframe(self, request):  # noqa: ANN001
+        frame = _market_frame(request.symbol, max(request.lookback_bars, 600))
+        frame.attrs["stale"] = True
+        frame.attrs["cache_age_seconds"] = 120.0
+        return frame
+
+    monkeypatch.setattr(MarketDataService, "fetch_dataframe", stale_fetch_dataframe)
+
+    with TestClient(create_app()) as client:
+        order_response = client.post(
+            "/paper/orders/manual",
+            json={
+                "symbol": "BTC-USD",
+                "timeframe": "1h",
+                "side": "buy",
+                "quantity": 0.1,
+                "stop_loss_price": 95.0,
+            },
+        )
+
+    assert order_response.status_code == 503
+    assert "requires fresh market data" in order_response.json()["detail"]

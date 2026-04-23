@@ -8,8 +8,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from ..core.models import ExecutionReport, OrderIntent, RiskDecision, TradeDecisionLog
-from .models import Base, PaperCycleJobRecord, PaperCycleRunRecord, PortfolioStateRecord, TradeAuditEvent
-from .schemas import PortfolioStateView, TradeAuditEventView
+from .models import Base, OperatorAuditEvent, PaperCycleJobRecord, PaperCycleRunRecord, PortfolioStateRecord, TradeAuditEvent
+from .schemas import OperatorAuditEventView, PortfolioStateView, TradeAuditEventView
 
 if TYPE_CHECKING:
     from ..orchestration.models import PaperCycleJobCreate, PaperCycleJobView, PaperCycleRunView
@@ -65,6 +65,35 @@ class TradeAuditStore:
             result = await session.execute(query)
             events = result.scalars().all()
             return [self._to_trade_event_view(event) for event in events]
+
+    async def record_operator_action(
+        self,
+        *,
+        username: str,
+        role: str,
+        action: str,
+        resource: str,
+        outcome: str,
+        details: dict | None = None,
+    ) -> None:
+        async with self.session_factory() as session:
+            event = OperatorAuditEvent(
+                username=username,
+                role=role,
+                action=action,
+                resource=resource,
+                outcome=outcome,
+                details_payload=details or {},
+            )
+            session.add(event)
+            await session.commit()
+
+    async def list_operator_actions(self, *, limit: int = 50) -> list[OperatorAuditEventView]:
+        async with self.session_factory() as session:
+            query = select(OperatorAuditEvent).order_by(desc(OperatorAuditEvent.id)).limit(limit)
+            result = await session.execute(query)
+            events = result.scalars().all()
+            return [self._to_operator_event_view(event) for event in events]
 
     async def save_portfolio_state(self, state: PortfolioStateView) -> PortfolioStateView:
         async with self.session_factory() as session:
@@ -281,4 +310,16 @@ class TradeAuditStore:
             daily_anchor_equity=record.daily_anchor_equity,
             daily_anchor_date=record.daily_anchor_date,
             positions_payload=record.positions_payload,
+        )
+
+    def _to_operator_event_view(self, event: OperatorAuditEvent) -> OperatorAuditEventView:
+        return OperatorAuditEventView(
+            id=event.id,
+            created_at=event.created_at,
+            username=event.username,
+            role=event.role,
+            action=event.action,
+            resource=event.resource,
+            outcome=event.outcome,
+            details_payload=event.details_payload,
         )

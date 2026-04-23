@@ -23,6 +23,10 @@ def build_market_data_provider(data_settings: DataSettings, exchange_settings: E
             raise ValueError(
                 f"Configured market-data routing order contains no supported providers: {data_settings.provider_routing!r}"
             )
-        return RoutingMarketDataProvider(providers)
+        return RoutingMarketDataProvider(
+            providers,
+            max_retries=data_settings.provider_max_retries,
+            retry_backoff_seconds=data_settings.retry_backoff_seconds,
+        )
 
     raise ValueError(f"Unsupported market-data provider setting: {data_settings.provider}")

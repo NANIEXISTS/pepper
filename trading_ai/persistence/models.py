@@ -35,6 +35,23 @@ class TradeAuditEvent(Base):
     metadata_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
+class OperatorAuditEvent(Base):
+    __tablename__ = "operator_audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource: Mapped[str] = mapped_column(String(128), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    details_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
 class PaperCycleJobRecord(Base):
     __tablename__ = "paper_cycle_jobs"
 

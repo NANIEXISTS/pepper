@@ -2,6 +2,23 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.6.0] - 2026-04-23
+
+### Added
+
+- Optional operator authentication with `viewer`, `trader`, and `admin` roles for dashboard/API access
+- Operator-audit event persistence for auth failures, authorization failures, and privileged paper-mode actions
+- Last-good market-data snapshot fallback for read paths during transient provider failures
+- Explicit stale-data metadata in dashboard and market-data API payloads
+- Tests covering auth gating, operator audit, stale-data rejection on writable paths, and `503` behavior when no provider or cache is available
+
+### Changed
+
+- Writable paper-mode endpoints now require trader access when auth is enabled
+- Admin-only endpoint added for operator audit inspection
+- Manual paper orders and paper cycles reject stale market snapshots instead of trading on cached data silently
+- Market-data failures now degrade predictably instead of bubbling opaque backend exceptions
+
 ## [0.5.0] - 2026-04-23
 
 ### Added

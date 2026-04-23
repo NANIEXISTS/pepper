@@ -1,42 +1,42 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 import math
 
 import pandas as pd
 
 from ..core.models import MarketBar, MarketDataRequest
 from ..logging_config import get_logger
+from .exceptions import MarketDataUnavailableError
 from .providers.base import MarketDataProvider
 
 logger = get_logger(__name__)
 
 
 @dataclass(slots=True)
+class CachedMarketFrame:
+    frame: pd.DataFrame
+    cached_at: datetime
+
+
+@dataclass(slots=True)
 class MarketDataService:
     provider: MarketDataProvider
+    cache_max_staleness_seconds: int = 900
+    _cache: dict[str, CachedMarketFrame] = field(default_factory=dict)
 
     async def fetch_dataframe(self, request: MarketDataRequest) -> pd.DataFrame:
-        bars = await self.provider.fetch_ohlcv(request)
-        frame = self._to_frame(bars)
-        provider_timeframe = str(frame["timeframe"].iloc[-1])
-        self._validate_frame(frame, provider_timeframe)
-        if provider_timeframe != request.timeframe:
-            frame = self._resample(frame, request.symbol, provider_timeframe, request.timeframe)
-        if len(frame) > request.lookback_bars:
-            frame = frame.iloc[-request.lookback_bars :].copy()
-        self._validate_frame(frame, request.timeframe)
-        frame.attrs["provider"] = getattr(self.provider, "name", self.provider.__class__.__name__)
-        frame.attrs["source_timeframe"] = provider_timeframe
-        logger.info(
-            "market_dataframe_ready",
-            symbol=request.symbol,
-            timeframe=request.timeframe,
-            source_timeframe=provider_timeframe,
-            rows=len(frame),
-        )
-        return frame
+        cache_key = self._cache_key(request)
+        try:
+            bars = await self.provider.fetch_ohlcv(request)
+            frame = self._prepare_frame(bars, request)
+            cached_frame = frame.copy(deep=True)
+            cached_frame.attrs = dict(frame.attrs)
+            self._cache[cache_key] = CachedMarketFrame(frame=cached_frame, cached_at=datetime.now(UTC))
+            return frame
+        except Exception as exc:
+            return self._frame_from_cache(cache_key, request, exc)
 
     @staticmethod
     def _to_frame(bars: list[MarketBar]) -> pd.DataFrame:
@@ -48,6 +48,91 @@ class MarketDataService:
         if frame.index.has_duplicates:
             raise ValueError("Market data contains duplicate timestamps.")
         return frame[["symbol", "timeframe", "open", "high", "low", "close", "volume"]]
+
+    def _prepare_frame(self, bars: list[MarketBar], request: MarketDataRequest) -> pd.DataFrame:
+        frame = self._to_frame(bars)
+        provider_timeframe = str(frame["timeframe"].iloc[-1])
+        self._validate_frame(frame, provider_timeframe)
+        if provider_timeframe != request.timeframe:
+            frame = self._resample(frame, request.symbol, provider_timeframe, request.timeframe)
+        if len(frame) > request.lookback_bars:
+            frame = frame.iloc[-request.lookback_bars :].copy()
+        self._validate_frame(frame, request.timeframe)
+        frame.attrs["provider"] = getattr(self.provider, "name", self.provider.__class__.__name__)
+        frame.attrs["source_timeframe"] = provider_timeframe
+        frame.attrs["stale"] = False
+        frame.attrs["cache_age_seconds"] = 0.0
+        frame.attrs["provider_failures"] = []
+        frame.attrs["fresh_as_of"] = datetime.now(UTC).isoformat()
+        logger.info(
+            "market_dataframe_ready",
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            source_timeframe=provider_timeframe,
+            rows=len(frame),
+            stale=False,
+        )
+        return frame
+
+    def _frame_from_cache(self, cache_key: str, request: MarketDataRequest, exc: Exception) -> pd.DataFrame:
+        failures = self._failure_details(exc)
+        cached = self._cache.get(cache_key)
+        if cached is None:
+            raise self._unavailable_error(request, failures, cached_available=False) from exc
+
+        age_seconds = (datetime.now(UTC) - cached.cached_at).total_seconds()
+        if age_seconds > self.cache_max_staleness_seconds:
+            raise self._unavailable_error(
+                request,
+                failures,
+                cached_available=True,
+                cache_age_seconds=age_seconds,
+            ) from exc
+
+        frame = cached.frame.copy(deep=True)
+        frame.attrs = dict(cached.frame.attrs)
+        if len(frame) > request.lookback_bars:
+            frame = frame.iloc[-request.lookback_bars :].copy()
+            frame.attrs = dict(cached.frame.attrs)
+        frame.attrs["stale"] = True
+        frame.attrs["cache_age_seconds"] = age_seconds
+        frame.attrs["provider_failures"] = failures
+        frame.attrs["fresh_as_of"] = cached.cached_at.isoformat()
+        logger.warning(
+            "market_dataframe_cache_used",
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            cache_age_seconds=age_seconds,
+            failures=failures,
+            rows=len(frame),
+        )
+        return frame
+
+    @staticmethod
+    def _failure_details(exc: Exception) -> list[str]:
+        if isinstance(exc, MarketDataUnavailableError):
+            return exc.failures or [str(exc)]
+        return [str(exc)]
+
+    def _unavailable_error(
+        self,
+        request: MarketDataRequest,
+        failures: list[str],
+        *,
+        cached_available: bool,
+        cache_age_seconds: float | None = None,
+    ) -> MarketDataUnavailableError:
+        return MarketDataUnavailableError(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            failures=failures,
+            cached_available=cached_available,
+            cache_age_seconds=cache_age_seconds,
+        )
+
+    @staticmethod
+    def _cache_key(request: MarketDataRequest) -> str:
+        return f"{request.symbol.upper()}::{request.timeframe.lower()}"
 
     @staticmethod
     def _resample(frame: pd.DataFrame, symbol: str, source_timeframe: str, target_timeframe: str) -> pd.DataFrame:

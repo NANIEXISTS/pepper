@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from dynaconf import Dynaconf
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +31,9 @@ class DataSettings(BaseModel):
     supported_timeframes: list[str] = Field(default_factory=lambda: ["5m", "15m", "1h", "4h", "1d"])
     default_lookback_bars: int = Field(default=500, ge=50, le=5000)
     ccxt_quote_fallbacks: list[str] = Field(default_factory=lambda: ["USDT", "USDC", "FDUSD", "BUSD"])
+    cache_max_staleness_seconds: int = Field(default=900, ge=60, le=86_400)
+    provider_max_retries: int = Field(default=1, ge=0, le=5)
+    retry_backoff_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
 
 
 class RiskSettings(BaseModel):
@@ -90,6 +93,18 @@ class LoggingSettings(BaseModel):
     json_output: bool = True
 
 
+class OperatorAccountSettings(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
+    role: Literal["viewer", "trader", "admin"] = "viewer"
+
+
+class AuthSettings(BaseModel):
+    enabled: bool = False
+    realm: str = "Pepper Operator Console"
+    operators: list[OperatorAccountSettings] = Field(default_factory=list)
+
+
 class TradingSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -107,6 +122,7 @@ class TradingSettings(BaseModel):
     backtesting: BacktestingSettings = Field(default_factory=BacktestingSettings)
     persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
 
 
 def _settings_source() -> Dynaconf:

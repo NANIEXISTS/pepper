@@ -41,6 +41,12 @@ class PaperTradingService:
         async with lock:
             request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
             frame = await self.market_data.fetch_dataframe(request)
+            if frame.attrs.get("stale", False):
+                cache_age_seconds = float(frame.attrs.get("cache_age_seconds", 0.0))
+                raise RuntimeError(
+                    f"Paper cycle requires fresh market data for {symbol} {timeframe}. "
+                    f"Last good snapshot age: {cache_age_seconds:.1f}s."
+                )
             enriched = self.feature_engineer.enrich(frame)
             latest_price = float(enriched.iloc[-1]["close"])
             price_map = await self._price_map_for_cycle(symbol=symbol, timeframe=timeframe, latest_price=latest_price)
@@ -131,7 +137,12 @@ class PaperTradingService:
             fetch_tasks.append((tracked_symbol, asyncio.create_task(self.market_data.fetch_dataframe(request))))
 
         for tracked_symbol, task in fetch_tasks:
-            frame = await task
+            try:
+                frame = await task
+            except Exception:
+                continue
+            if frame.attrs.get("stale", False):
+                continue
             price_map[tracked_symbol] = float(frame.iloc[-1]["close"])
 
         return price_map

@@ -33,3 +33,14 @@ class PortfolioStateView(BaseModel):
     daily_anchor_equity: float
     daily_anchor_date: date
     positions_payload: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class OperatorAuditEventView(BaseModel):
+    id: int
+    created_at: datetime
+    username: str
+    role: str
+    action: str
+    resource: str
+    outcome: str
+    details_payload: dict[str, Any] = Field(default_factory=dict)

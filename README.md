@@ -39,12 +39,14 @@ Pepper is structured to avoid those failures by default.
 - Supports writable paper-mode operator actions: create jobs, start/pause jobs, run jobs on demand, and submit manual paper orders
 - Schedules recurring paper cycles with persisted job state and run history
 - Routes market data across `ccxt` and Yahoo with fallback handling
+- Uses last-good snapshot fallback for read paths and explicit `503` failures when fresh market data is unavailable
 - Normalizes market data asynchronously and rejects malformed OHLCV before features or trading logic see it
 - Computes deterministic bar-close features
 - Runs leakage-aware backtests with walk-forward validation
 - Tracks portfolio cash, equity, positions, and daily PnL anchor
 - Executes every order through a mandatory `RiskAuditAgent`
 - Stores audit records for trade decisions and execution outcomes
+- Supports role-gated operator authentication for read-only vs writable controls
 - Runs a multi-agent paper-trading loop with explainable debate traces
 - Exposes a guarded live-routing foundation through ccxt without enabling live trading by default
 
@@ -85,7 +87,17 @@ The repo is built around a few hard rules:
 - `ccxt` capability checks require `fetchOHLCV` support before use
 - Duplicate timestamps and malformed candles are rejected
 - Intraday gaps are surfaced as warnings instead of passing silently
+- Last-good snapshots can serve read-only flows during transient outages and are marked explicitly as stale
 - Yahoo remains available as a fallback for symbols or venues the exchange path cannot satisfy
+
+## Operator auth
+
+- Optional HTTP Basic authentication can protect the dashboard and API
+- Roles are hierarchical: `viewer`, `trader`, `admin`
+- Read routes require viewer access when auth is enabled
+- Writable paper-trading routes require trader access when auth is enabled
+- Operator auth failures and privileged actions are written to the operator-audit trail
+- Keep credentials out of the repo; enable auth through local config or `.env` only
 
 ## Repo layout
 
@@ -149,6 +161,7 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 | `GET /health` | service health and mode |
 | `GET /dashboard` | operator console UI |
 | `GET /dashboard/data` | aggregated dashboard read model |
+| `GET /auth/session` | current operator role and auth mode |
 | `GET /config` | effective runtime summary |
 | `GET /market-data/{symbol}` | normalized OHLCV preview |
 | `GET /features/{symbol}` | latest engineered features |
@@ -165,6 +178,7 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 | `GET /paper/runs` | list persisted paper-cycle run history |
 | `POST /paper/orders/manual` | submit a manual paper order using live market context |
 | `GET /audit/trades` | list recent trade decisions, fills, and vetoes |
+| `GET /audit/operators` | list operator auth and privileged-action audit events |
 
 ## Current verification status
 
@@ -172,6 +186,8 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 - FastAPI app smoke-tested
 - Backtesting route implemented
 - Paper-trading cycle route implemented
+- Market-data outage handling returns stale-read metadata or explicit `503`s
+- Auth and role checks cover the writable operator surface
 - Live router still disabled by default
 
 ## Roadmap status

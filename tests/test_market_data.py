@@ -6,7 +6,7 @@ import pytest
 
 import trading_ai.data.providers.ccxt as ccxt_provider_module
 from trading_ai.core.models import MarketBar, MarketDataRequest
-from trading_ai.data import MarketDataService
+from trading_ai.data import MarketDataService, MarketDataUnavailableError
 from trading_ai.data.providers import CcxtMarketDataProvider, RoutingMarketDataProvider
 from trading_ai.settings import DataSettings, ExchangeSettings
 
@@ -84,6 +84,28 @@ class _HourlyProvider:
         return bars
 
 
+class _FlakyProvider:
+    name = "flaky"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def fetch_ohlcv(self, request: MarketDataRequest) -> list[MarketBar]:  # noqa: ARG002
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("transient upstream failure")
+        return [
+            _bar(
+                timestamp=datetime(2025, 1, 1, 1, tzinfo=UTC),
+                open_=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1_000.0,
+            )
+        ]
+
+
 @pytest.mark.asyncio
 async def test_routing_provider_falls_back_to_next_provider() -> None:
     provider = RoutingMarketDataProvider([_FailingProvider(), _SuccessfulProvider()])
@@ -98,7 +120,7 @@ async def test_routing_provider_falls_back_to_next_provider() -> None:
 async def test_market_data_service_rejects_invalid_candles() -> None:
     service = MarketDataService(_InvalidCandleProvider())
 
-    with pytest.raises(ValueError, match="traded prices"):
+    with pytest.raises(MarketDataUnavailableError, match="traded prices"):
         await service.fetch_dataframe(MarketDataRequest(symbol="BTC-USD", timeframe="1h", lookback_bars=50))
 
 
@@ -111,6 +133,29 @@ async def test_market_data_service_resamples_hourly_to_4h() -> None:
     assert len(frame) == 2
     assert set(frame["timeframe"]) == {"4h"}
     assert frame.attrs["source_timeframe"] == "1h"
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_uses_cached_snapshot_when_provider_fails() -> None:
+    provider = _FlakyProvider()
+    service = MarketDataService(provider, cache_max_staleness_seconds=3600)
+    request = MarketDataRequest(symbol="BTC-USD", timeframe="1h", lookback_bars=50)
+
+    fresh = await service.fetch_dataframe(request)
+    stale = await service.fetch_dataframe(request)
+
+    assert fresh.attrs["stale"] is False
+    assert stale.attrs["stale"] is True
+    assert stale.attrs["cache_age_seconds"] >= 0.0
+    assert stale.attrs["provider_failures"]
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_raises_when_no_cache_exists() -> None:
+    service = MarketDataService(_FailingProvider(), cache_max_staleness_seconds=3600)
+
+    with pytest.raises(MarketDataUnavailableError, match="Market data unavailable"):
+        await service.fetch_dataframe(MarketDataRequest(symbol="BTC-USD", timeframe="1h", lookback_bars=50))
 
 
 class _FakeCcxtExchange:
