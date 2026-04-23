@@ -81,4 +81,17 @@ def test_walk_forward_validator_creates_non_overlapping_test_windows() -> None:
     test_ranges = [(window.test_start, window.test_end) for window in result.windows]
     assert test_ranges[0][1] <= test_ranges[1][0]
     assert test_ranges[1][1] <= test_ranges[2][0]
+    assert all(window.result.ended_at == window.test_end for window in result.windows)
     assert result.summary.compounded_return_fraction == pytest.approx(result.summary.compounded_return_fraction)
+
+
+def test_backtest_trade_bars_held_counts_only_bars_with_exposure() -> None:
+    index = pd.date_range("2025-01-01", periods=4, freq="1h", tz="UTC")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0], index=index)
+    position = pd.Series([0.0, 1.0, 1.0, 0.0], index=index)
+    engine = BacktestEngine(BacktestingSettings())
+
+    trades = engine._extract_trades(close, position)  # noqa: SLF001
+
+    assert len(trades) == 1
+    assert trades[0].bars_held == 2

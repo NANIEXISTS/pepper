@@ -28,4 +28,5 @@ class PortfolioView(BaseModel):
     equity: float
     daily_pnl_fraction: float
     positions: dict[str, Position]
+    stale_symbols: list[str] = Field(default_factory=list)
     updated_at: datetime

@@ -152,7 +152,7 @@ class BacktestEngine:
                         side="long" if current_position > 0 else "short",
                         position_fraction=abs(current_position),
                         pnl_fraction=float(pnl_fraction),
-                        bars_held=int(position.loc[current_entry_time:timestamp].shape[0]),
+                        bars_held=int((position.loc[current_entry_time:timestamp] != 0).sum()),
                     )
                 )
                 current_entry_time = None
@@ -172,7 +172,7 @@ class BacktestEngine:
                     side="long" if current_position > 0 else "short",
                     position_fraction=abs(current_position),
                     pnl_fraction=float(pnl_fraction),
-                    bars_held=int(position.loc[current_entry_time:exit_timestamp].shape[0]),
+                    bars_held=int((position.loc[current_entry_time:exit_timestamp] != 0).sum()),
                 )
             )
 

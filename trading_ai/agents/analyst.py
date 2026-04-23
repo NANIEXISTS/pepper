@@ -15,11 +15,13 @@ class AnalystAgent(TradingAgent):
 
     async def run(self, ctx: AgentContext) -> AnalystOutput:
         latest = ctx.features.iloc[-1]
-        ema_gap = float((latest["ema_20"] - latest["ema_50"]) / latest["close"])
+        close_price = float(latest["close"]) if pd.notna(latest["close"]) else 0.0
+        safe_close = close_price if close_price > 0 else 1.0
+        ema_gap = float((latest["ema_20"] - latest["ema_50"]) / safe_close)
         macd = float(latest["macd"])
         rsi = float(latest["rsi_14"]) if pd.notna(latest["rsi_14"]) else 50.0
         trend_strength = min(abs(ema_gap) * 100, 1.0)
-        confidence = max(min((trend_strength + min(abs(macd) / max(latest["close"], 1.0), 0.4)), 1.0), 0.0)
+        confidence = max(min((trend_strength + min(abs(macd) / safe_close, 0.4)), 1.0), 0.0)
 
         deterministic_summary = (
             f"EMA gap={ema_gap:.4f}, MACD={macd:.4f}, RSI={rsi:.2f}. "

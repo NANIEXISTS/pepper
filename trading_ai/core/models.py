@@ -64,6 +64,8 @@ class OrderIntent(BaseModel):
     def risk_fraction(self, portfolio_equity: float) -> float:
         if self.stop_loss_price is None:
             return 0.0
+        if portfolio_equity <= 0:
+            return float("inf")
         worst_case_loss = abs(self.entry_price - self.stop_loss_price) * self.quantity
         return worst_case_loss / portfolio_equity
 
@@ -73,6 +75,7 @@ class PortfolioSnapshot(BaseModel):
     cash: float = 0.0
     daily_pnl_fraction: float = 0.0
     open_positions: int = Field(default=0, ge=0)
+    stale_symbols: list[str] = Field(default_factory=list)
 
 
 class RiskCheckContext(BaseModel):

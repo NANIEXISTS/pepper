@@ -2,6 +2,22 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.3.1] - 2026-04-23
+
+### Fixed
+
+- Rejected sells without an existing long position instead of fabricating realized PnL
+- Removed closed positions cleanly even when they closed at a loss
+- Counted `bars_held` using bars with actual exposure only
+- Guarded analyst confidence math against zero or invalid close prices
+- Rejected order placement when portfolio valuation contains stale position prices
+- Logged scheduler loop failures explicitly and hardened task cleanup
+
+### Added
+
+- Regression tests for portfolio accounting, stale-price rejection, bars-held counting, analyst zero-price handling, and paper sell slippage direction
+- Regression assertion that walk-forward results end exactly at each test-window boundary
+
 ## [0.3.0] - 2026-04-23
 
 ### Added

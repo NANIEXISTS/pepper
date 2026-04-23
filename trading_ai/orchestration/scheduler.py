@@ -5,9 +5,12 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 
 from ..alerts import AlertService
+from ..logging_config import get_logger
 from ..persistence import TradeAuditStore
 from .models import PaperCycleJobCreate, PaperCycleJobView, PaperCycleRunView, PaperTradingCycleResult
 from .paper_trading import PaperTradingService
+
+logger = get_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -126,7 +129,7 @@ class PaperTradingScheduler:
         if existing is not None and not existing.done():
             return
         task = asyncio.create_task(self._job_loop(job_id), name=f"paper-cycle-job-{job_id}")
-        task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
+        task.add_done_callback(lambda done_task, job_id=job_id: self._clear_task(job_id, done_task))
         self._tasks[job_id] = task
 
     async def _stop_task(self, job_id: int) -> None:
@@ -154,9 +157,20 @@ class PaperTradingScheduler:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception(
+                    "scheduled_cycle_failed",
+                    job_id=job.id,
+                    symbol=job.symbol,
+                    timeframe=job.timeframe,
+                    error=str(exc),
+                )
 
             elapsed = asyncio.get_running_loop().time() - started
             sleep_seconds = max(job.interval_seconds - elapsed, 1.0)
             await asyncio.sleep(sleep_seconds)
+
+    def _clear_task(self, job_id: int, task: asyncio.Task[None]) -> None:
+        current = self._tasks.get(job_id)
+        if current is task:
+            self._tasks.pop(job_id, None)

@@ -11,6 +11,12 @@ class RiskAuditAgent:
     settings: RiskSettings
 
     async def run(self, context: RiskCheckContext) -> RiskDecision:
+        if context.portfolio.stale_symbols:
+            return RiskDecision(
+                approved=False,
+                reason="stale_portfolio_prices",
+            )
+
         if self.settings.stop_loss_required and context.order.stop_loss_price is None:
             return RiskDecision(
                 approved=False,
@@ -28,6 +34,13 @@ class RiskAuditAgent:
             return RiskDecision(
                 approved=False,
                 reason="max_positions_reached",
+            )
+
+        if context.portfolio.equity <= 0:
+            return RiskDecision(
+                approved=False,
+                reason="non_positive_portfolio_equity",
+                risk_fraction=float("inf"),
             )
 
         risk_fraction = context.order.risk_fraction(context.portfolio.equity)
