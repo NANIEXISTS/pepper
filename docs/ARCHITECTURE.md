@@ -9,8 +9,10 @@ Implemented layers:
 - `trading_ai/settings.py`: typed settings loaded once from `config.yaml` and `.env`
 - `trading_ai/core/`: shared enums and pydantic models
 - `trading_ai/data/`: async market-data fetching and normalization
+- `trading_ai/venues/`: venue capability metadata and normalization helpers
 - `trading_ai/features/`: deterministic, bar-close feature engineering
 - `trading_ai/backtesting/`: EMA baseline strategy, leakage checks, and walk-forward validation
+- `trading_ai/strategy_builder/`: typed strategy graphs, validation, and deterministic NL compilation
 - `trading_ai/portfolio/`: cash, positions, equity, and daily anchor tracking
 - `trading_ai/alerts/`: operator-facing alert history
 - `trading_ai/agents/`: analyst, debate, strategy, and trader agents
@@ -25,9 +27,11 @@ Implemented layers:
 ## Hard invariants
 
 - Data layer returns data only. No strategy decisions there.
+- Venue metadata is inspectable, but capability inspection itself must not place orders.
 - Feature engineering runs on ordered, timezone-aware bars only.
 - Backtests execute on the next bar after a signal, never on the same bar that generated it.
 - Walk-forward test windows must remain out-of-sample relative to their training windows.
+- Strategy prompts compile into typed graphs first. They do not execute directly.
 - `RiskAuditAgent.run()` must execute before every order.
 - `ExecutionEngine.place_order()` is the only order entry point.
 - Paper and live trading must share the same execution engine.
@@ -62,6 +66,7 @@ Implemented layers:
 
 - Add real exchange connectors only after paper-trading gates pass
 - Verify real-world paper-trading duration and live capital ramp-up before calling Phase 6 complete
+- Keep the live-gate checklist reviewable through the API and operator docs
 
 ## What not to do
 

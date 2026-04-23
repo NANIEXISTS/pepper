@@ -2,6 +2,8 @@ const state = {
   symbol: "BTC-USD",
   timeframe: "1h",
   overview: null,
+  strategyDraft: null,
+  strategyBacktest: null,
 };
 
 const elements = {
@@ -26,6 +28,12 @@ const elements = {
   manualStopLossInput: document.getElementById("manual-stop-loss-input"),
   manualTakeProfitInput: document.getElementById("manual-take-profit-input"),
   manualOrderButton: document.getElementById("manual-order-button"),
+  strategyForm: document.getElementById("strategy-form"),
+  strategyPromptInput: document.getElementById("strategy-prompt-input"),
+  strategyDraftButton: document.getElementById("strategy-draft-button"),
+  strategyValidateButton: document.getElementById("strategy-validate-button"),
+  strategyBacktestButton: document.getElementById("strategy-backtest-button"),
+  strategyStatus: document.getElementById("strategy-status"),
 };
 
 function money(value) {
@@ -50,12 +58,24 @@ function setText(id, value, className = "") {
   node.className = className;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, options);
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
-    const detail = typeof payload === "object" && payload?.detail ? payload.detail : payload;
+    const detail =
+      typeof payload === "object" && payload?.detail
+        ? Array.isArray(payload.detail)
+          ? payload.detail.join("; ")
+          : payload.detail
+        : payload;
     throw new Error(String(detail));
   }
   return payload;
@@ -202,10 +222,7 @@ function renderJobs(jobs) {
       const action = button.dataset.jobAction;
       const jobId = button.dataset.jobId;
       try {
-        const path =
-          action === "run"
-            ? `/paper/jobs/${jobId}/run`
-            : `/paper/jobs/${jobId}/${action}`;
+        const path = action === "run" ? `/paper/jobs/${jobId}/run` : `/paper/jobs/${jobId}/${action}`;
         await apiRequest(path, { method: "POST" });
         elements.cycleStatus.textContent = action === "run" ? `Job ${jobId} executed.` : `Job ${jobId} updated.`;
         await refresh();
@@ -230,6 +247,14 @@ function renderRuns(runs) {
       const jobLabel = run.job_id ? `job ${run.job_id}` : run.source;
       const execution = run.execution_status ? ` - ${run.execution_status}` : "";
       const error = run.error_message ? `<p class="negative">${run.error_message}</p>` : "";
+      const payload = run.cycle_payload
+        ? `
+            <details class="details-block">
+              <summary>Cycle payload</summary>
+              <pre class="json-block">${escapeHtml(JSON.stringify(run.cycle_payload, null, 2))}</pre>
+            </details>
+          `
+        : "";
       return `
         <article class="alert-item">
           <header>
@@ -238,6 +263,7 @@ function renderRuns(runs) {
           </header>
           <p><span class="${tone}">${run.status}</span>${execution}</p>
           ${error}
+          ${payload}
         </article>
       `;
     })
@@ -267,6 +293,20 @@ function renderTradeAudit(events) {
             <span class="audit-chip">confidence ${percent(event.confidence)}</span>
             <span class="audit-chip">${event.risk_reason}</span>
           </div>
+          <details class="details-block">
+            <summary>Order + execution report</summary>
+            <pre class="json-block">${escapeHtml(
+              JSON.stringify(
+                {
+                  order: event.order_payload,
+                  report: event.report_payload,
+                  metadata: event.metadata_payload,
+                },
+                null,
+                2,
+              ),
+            )}</pre>
+          </details>
         </article>
       `;
     })
@@ -316,6 +356,196 @@ function renderCycle(lastCycle) {
   renderTags("cycle-metadata", metadataTags);
 }
 
+function renderWalkForwardWindows(researchView) {
+  const root = document.getElementById("walk-forward-list");
+  const windows = researchView.walk_forward_windows || [];
+  if (!windows.length) {
+    root.innerHTML = '<p class="table-empty">No walk-forward windows available.</p>';
+    return;
+  }
+  root.innerHTML = windows
+    .map((window, index) => `
+      <article class="alert-item">
+        <header>
+          <strong>Window ${index + 1}</strong>
+          <time>${new Date(window.test_start).toLocaleDateString()} to ${new Date(window.test_end).toLocaleDateString()}</time>
+        </header>
+        <div class="audit-meta">
+          <span class="audit-chip">return ${percent(window.total_return_fraction)}</span>
+          <span class="audit-chip">sharpe ${number(window.sharpe_ratio, 2)}</span>
+          <span class="audit-chip negative">drawdown ${percent(window.max_drawdown_fraction)}</span>
+        </div>
+        <p>Train ${new Date(window.train_start).toLocaleDateString()} to ${new Date(window.train_end).toLocaleDateString()}</p>
+        ${window.warnings?.length ? `<p>${window.warnings.join(" | ")}</p>` : ""}
+      </article>
+    `)
+    .join("");
+}
+
+function renderResearchTrades(researchView) {
+  const root = document.getElementById("research-trades-list");
+  const trades = researchView.trades || [];
+  if (!trades.length) {
+    root.innerHTML = '<p class="table-empty">No research trades available.</p>';
+    return;
+  }
+  root.innerHTML = trades
+    .map((trade) => {
+      const tone = trade.pnl_fraction >= 0 ? "positive" : "negative";
+      return `
+        <article class="alert-item">
+          <header>
+            <strong>${trade.side}</strong>
+            <time>${new Date(trade.entry_time).toLocaleDateString()} to ${new Date(trade.exit_time).toLocaleDateString()}</time>
+          </header>
+          <div class="audit-meta">
+            <span class="audit-chip">entry ${money(trade.entry_price)}</span>
+            <span class="audit-chip">exit ${money(trade.exit_price)}</span>
+            <span class="audit-chip ${tone}">pnl ${percent(trade.pnl_fraction)}</span>
+            <span class="audit-chip">bars ${trade.bars_held}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderPortfolioBreakdown(items) {
+  const root = document.getElementById("portfolio-breakdown-list");
+  if (!items.length) {
+    root.innerHTML = '<p class="table-empty">No allocation yet.</p>';
+    return;
+  }
+  root.innerHTML = items
+    .map((item) => `
+      <article class="alert-item">
+        <header>
+          <strong>${item.symbol}</strong>
+          <time>${percent(item.weight_fraction)} weight</time>
+        </header>
+        <div class="audit-meta">
+          <span class="audit-chip">value ${money(item.market_value)}</span>
+          <span class="audit-chip ${item.unrealized_pnl >= 0 ? "positive" : "negative"}">
+            unrealized ${money(item.unrealized_pnl)}
+          </span>
+          <span class="audit-chip ${item.realized_pnl >= 0 ? "positive" : "negative"}">
+            realized ${money(item.realized_pnl)}
+          </span>
+        </div>
+      </article>
+    `)
+    .join("");
+}
+
+function renderVenues(catalog) {
+  const root = document.getElementById("venues-list");
+  const venues = catalog?.venues || [];
+  if (!venues.length) {
+    root.innerHTML = '<p class="table-empty">No venue metadata available.</p>';
+    return;
+  }
+  root.innerHTML = venues
+    .map((venue) => `
+      <article class="alert-item">
+        <header>
+          <strong>${venue.venue_id}</strong>
+          <time>${venue.configured ? "configured" : "available"}</time>
+        </header>
+        <div class="audit-meta">
+          <span class="audit-chip">${venue.venue_kind}</span>
+          <span class="audit-chip">${venue.transport}</span>
+          <span class="audit-chip">${venue.symbol_format}</span>
+          ${venue.supports_sandbox ? '<span class="audit-chip">sandbox</span>' : ""}
+          ${venue.venue_supported_order_types?.length ? `<span class="audit-chip">venue orders ${venue.venue_supported_order_types.join(", ")}</span>` : ""}
+          ${venue.engine_supported_order_types?.length ? `<span class="audit-chip">engine orders ${venue.engine_supported_order_types.join(", ")}</span>` : ""}
+        </div>
+        <p>${venue.notes.join(" ")}</p>
+      </article>
+    `)
+    .join("");
+}
+
+function renderStrategyGraph(draft, strategyBuilder) {
+  const root = document.getElementById("strategy-graph");
+  if (!draft?.graph) {
+    root.innerHTML = `
+      <p class="table-empty">Build a strategy to inspect its graph, rules, and risk policy.</p>
+      <p class="metric-subtext">${strategyBuilder?.sample_prompt || ""}</p>
+    `;
+    return;
+  }
+  const graph = draft.graph;
+  const issues = draft.validation.issues || [];
+  const warnings = draft.validation.warnings || [];
+  root.innerHTML = `
+    <section class="definition-group">
+      <h3>${graph.name}</h3>
+      <p class="metric-subtext">${graph.source_prompt || ""}</p>
+      <div class="tag-row">
+        <span class="tag ${draft.validation.passed ? "success" : "danger"}">${draft.validation.passed ? "valid" : "blocked"}</span>
+        ${draft.compiled_strategy_name ? `<span class="tag success">${draft.compiled_strategy_name}</span>` : ""}
+      </div>
+    </section>
+    <section class="definition-group">
+      <h3>Indicators</h3>
+      <div class="split-list">
+        ${graph.indicators
+          .map((indicator) => `
+            <div>
+              <strong>${indicator.node_id}</strong>
+              <p>${indicator.kind.toUpperCase()} ${indicator.window}</p>
+            </div>
+          `)
+          .join("")}
+      </div>
+    </section>
+    <section class="definition-group">
+      <h3>Rules</h3>
+      <div class="split-list">
+        ${graph.rules
+          .map((rule) => `
+            <div>
+              <strong>${rule.stage}</strong>
+              <p>${rule.description}</p>
+            </div>
+          `)
+          .join("")}
+      </div>
+    </section>
+    <section class="definition-group">
+      <h3>Risk</h3>
+      <p>Long only: ${graph.risk.long_only ? "yes" : "no"}.</p>
+      <p>Stop loss: ${graph.risk.stop_loss_percent ? percent(graph.risk.stop_loss_percent) : "missing"}.</p>
+    </section>
+    ${issues.length ? `<section class="definition-group"><h3>Issues</h3><p class="negative">${issues.join(" ")}</p></section>` : ""}
+    ${warnings.length ? `<section class="definition-group"><h3>Warnings</h3><p>${warnings.join(" ")}</p></section>` : ""}
+  `;
+}
+
+function renderBacktest(researchView) {
+  setText("research-title", state.strategyBacktest ? "Compiled Strategy Research" : "EMA Backtest");
+  setText(
+    "backtest-return-value",
+    percent(researchView.metrics.total_return_fraction),
+    researchView.metrics.total_return_fraction >= 0 ? "positive" : "negative",
+  );
+  setText("walk-forward-sharpe-value", number(researchView.walk_forward_summary.average_sharpe_ratio, 2));
+  setText("max-drawdown-value", percent(researchView.metrics.max_drawdown_fraction), "negative");
+
+  const equitySeries = researchView.equity_curve.map((point) => ({ value: point.equity }));
+  document.getElementById("equity-chart").innerHTML = chartSvg(equitySeries, "#f5b667");
+
+  const warningTags = [];
+  if (researchView.leakage_check?.passed) {
+    warningTags.push({ label: "Leakage check passed", kind: "success" });
+  }
+  (researchView.metrics.warnings || []).forEach((warning) => warningTags.push({ label: warning, kind: "warning" }));
+  (researchView.walk_forward_summary.warnings || []).forEach((warning) => warningTags.push({ label: warning, kind: "warning" }));
+  renderTags("backtest-warning-list", warningTags);
+  renderWalkForwardWindows(researchView);
+  renderResearchTrades(researchView);
+}
+
 function renderOverview(overview) {
   state.overview = overview;
   const {
@@ -323,10 +553,13 @@ function renderOverview(overview) {
     market,
     features,
     portfolio,
+    portfolio_breakdown: portfolioBreakdown,
     alerts,
     jobs,
     runs,
     trade_audit: tradeAudit,
+    venues,
+    strategy_builder: strategyBuilder,
     backtest,
     last_cycle: lastCycle,
   } = overview;
@@ -339,10 +572,7 @@ function renderOverview(overview) {
   setText("latest-timestamp", new Date(market.latest_timestamp).toLocaleString());
 
   const staleSuffix = portfolio.stale_symbols?.length ? ` - stale ${portfolio.stale_symbols.join(", ")}` : "";
-  setText(
-    "equity-value",
-    money(portfolio.equity),
-  );
+  setText("equity-value", money(portfolio.equity));
   setText(
     "equity-subtext",
     `${money(portfolio.cash)} cash - ${Object.keys(portfolio.positions || {}).length} open positions${staleSuffix}`,
@@ -350,13 +580,6 @@ function renderOverview(overview) {
 
   const dailyClass = portfolio.daily_pnl_fraction >= 0 ? "positive" : "negative";
   setText("daily-pnl-value", percent(portfolio.daily_pnl_fraction), dailyClass);
-  setText(
-    "backtest-return-value",
-    percent(backtest.metrics.total_return_fraction),
-    backtest.metrics.total_return_fraction >= 0 ? "positive" : "negative",
-  );
-  setText("walk-forward-sharpe-value", number(backtest.walk_forward_summary.average_sharpe_ratio, 2));
-  setText("max-drawdown-value", percent(backtest.metrics.max_drawdown_fraction), "negative");
   setText("ema20-value", money(features.ema_20));
   setText("ema50-value", money(features.ema_50));
   setText("ema200-value", money(features.ema_200));
@@ -365,23 +588,17 @@ function renderOverview(overview) {
   const priceSeries = market.recent_bars.map((bar) => ({ value: bar.close }));
   document.getElementById("price-chart").innerHTML = chartSvg(priceSeries, "#73d5b2");
 
-  const equitySeries = backtest.equity_curve.map((point) => ({ value: point.equity }));
-  document.getElementById("equity-chart").innerHTML = chartSvg(equitySeries, "#f5b667");
-
-  const warningTags = [];
-  if (backtest.leakage_check.passed) {
-    warningTags.push({ label: "Leakage check passed", kind: "success" });
-  }
-  backtest.metrics.warnings.forEach((warning) => warningTags.push({ label: warning, kind: "warning" }));
-  backtest.walk_forward_summary.warnings.forEach((warning) => warningTags.push({ label: warning, kind: "warning" }));
-  renderTags("backtest-warning-list", warningTags);
-
+  const researchView = state.strategyBacktest || backtest;
+  renderBacktest(researchView);
   renderPositions(portfolio.positions);
+  renderPortfolioBreakdown(portfolioBreakdown || []);
   renderAlerts(alerts || []);
   renderJobs(jobs || []);
   renderRuns(runs || []);
   renderTradeAudit(tradeAudit || []);
   renderCycle(lastCycle);
+  renderVenues(venues);
+  renderStrategyGraph(state.strategyDraft, strategyBuilder);
 }
 
 async function fetchOverview() {
@@ -433,7 +650,7 @@ async function createJob(event) {
       }),
     });
     elements.cycleStatus.textContent = "Paper job created.";
-    await fetchOverview();
+    await refresh();
   } catch (error) {
     elements.cycleStatus.textContent = error.message;
   } finally {
@@ -459,11 +676,108 @@ async function submitManualOrder(event) {
       }),
     });
     elements.cycleStatus.textContent = `${result.report.status} manual order for ${result.order.symbol}.`;
-    await fetchOverview();
+    await refresh();
   } catch (error) {
     elements.cycleStatus.textContent = error.message;
   } finally {
     elements.manualOrderButton.disabled = false;
+  }
+}
+
+async function buildStrategy(event) {
+  if (event) {
+    event.preventDefault();
+  }
+  elements.strategyDraftButton.disabled = true;
+  try {
+    const draft = await apiRequest("/strategies/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: elements.strategyPromptInput.value.trim(),
+      }),
+    });
+    state.strategyDraft = draft;
+    state.strategyBacktest = null;
+    elements.strategyStatus.textContent = draft.validation.passed
+      ? "Graph compiled successfully. Validate or run research next."
+      : draft.validation.issues.join(" ");
+    renderStrategyGraph(draft, state.overview?.strategy_builder);
+    if (state.overview) {
+      renderBacktest(state.overview.backtest);
+      setText("research-title", "EMA Backtest");
+    }
+  } catch (error) {
+    elements.strategyStatus.textContent = error.message;
+  } finally {
+    elements.strategyDraftButton.disabled = false;
+  }
+}
+
+async function validateStrategy() {
+  if (!state.strategyDraft?.graph) {
+    elements.strategyStatus.textContent = "Build a strategy graph before validation.";
+    return;
+  }
+  elements.strategyValidateButton.disabled = true;
+  try {
+    const validation = await apiRequest("/strategies/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ graph: state.strategyDraft.graph }),
+    });
+    state.strategyDraft.validation = validation;
+    elements.strategyStatus.textContent = validation.passed
+      ? "Validation passed. Research run is available."
+      : validation.issues.join(" ");
+    renderStrategyGraph(state.strategyDraft, state.overview?.strategy_builder);
+  } catch (error) {
+    elements.strategyStatus.textContent = error.message;
+  } finally {
+    elements.strategyValidateButton.disabled = false;
+  }
+}
+
+async function backtestStrategy() {
+  if (!state.strategyDraft?.graph) {
+    elements.strategyStatus.textContent = "Build a strategy graph before running research.";
+    return;
+  }
+  elements.strategyBacktestButton.disabled = true;
+  try {
+    const result = await apiRequest("/strategies/backtests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: state.symbol,
+        timeframe: state.timeframe,
+        lookback_bars: 700,
+        graph: state.strategyDraft.graph,
+      }),
+    });
+    state.strategyBacktest = {
+      leakage_check: result.leakage_check,
+      metrics: result.backtest.metrics,
+      equity_curve: result.backtest.equity_curve,
+      walk_forward_summary: result.walk_forward.summary,
+      walk_forward_windows: result.walk_forward.windows.map((window) => ({
+        train_start: window.train_start,
+        train_end: window.train_end,
+        test_start: window.test_start,
+        test_end: window.test_end,
+        total_return_fraction: window.result.metrics.total_return_fraction,
+        sharpe_ratio: window.result.metrics.sharpe_ratio,
+        max_drawdown_fraction: window.result.metrics.max_drawdown_fraction,
+        warnings: window.result.metrics.warnings,
+      })),
+      trades: result.backtest.trades,
+    };
+    elements.strategyStatus.textContent = "Compiled strategy backtest complete.";
+    renderBacktest(state.strategyBacktest);
+  } catch (error) {
+    elements.strategyStatus.textContent = error.message;
+  } finally {
+    elements.strategyBacktestButton.disabled = false;
   }
 }
 
@@ -488,6 +802,9 @@ elements.paperCycleButton.addEventListener("click", async () => {
 });
 elements.jobForm.addEventListener("submit", createJob);
 elements.manualOrderForm.addEventListener("submit", submitManualOrder);
+elements.strategyForm.addEventListener("submit", buildStrategy);
+elements.strategyValidateButton.addEventListener("click", validateStrategy);
+elements.strategyBacktestButton.addEventListener("click", backtestStrategy);
 
 window.addEventListener("load", () => {
   elements.jobSymbolInput.value = state.symbol;

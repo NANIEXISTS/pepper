@@ -16,7 +16,7 @@ from ..core.enums import TradeSignal, TradingMode
 from ..core.models import MarketDataRequest, OrderIntent, PortfolioSnapshot
 from ..data import MarketDataService, build_market_data_provider
 from ..data.exceptions import MarketDataUnavailableError
-from ..execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
+from ..execution import ExecutionEngine, PaperOrderRouter, build_live_order_router
 from ..features import FeatureEngineer
 from ..llm import LLMClient
 from ..logging_config import configure_logging
@@ -26,6 +26,8 @@ from ..portfolio import PortfolioService
 from ..reinforcement import ExecutionTimingCoordinator
 from ..risk import RiskAuditAgent
 from ..settings import get_settings
+from ..strategy_builder import StrategyBacktestRequest, StrategyCompiler, StrategyDraftRequest, StrategyValidateRequest
+from ..venues import VenueCatalogService
 from .security import AuthenticatedOperator, build_operator_auth
 
 
@@ -35,7 +37,7 @@ def create_app() -> FastAPI:
 
     audit_store = TradeAuditStore.from_database_url(settings.persistence.database_url)
     market_data_service = MarketDataService(
-        build_market_data_provider(settings.data, settings.exchange),
+        build_market_data_provider(settings.data, settings.exchange, settings.alpaca),
         cache_max_staleness_seconds=settings.data.cache_max_staleness_seconds,
     )
     feature_engineer = FeatureEngineer()
@@ -45,6 +47,8 @@ def create_app() -> FastAPI:
     alert_service = AlertService()
     portfolio_service = PortfolioService(starting_cash=settings.paper_trading.starting_cash)
     llm_client = LLMClient(settings.llm)
+    strategy_compiler = StrategyCompiler()
+    venue_catalog = VenueCatalogService(settings)
     execution_timing = ExecutionTimingCoordinator(settings.reinforcement)
     risk_agent = RiskAuditAgent(settings.risk)
     execution_engine = ExecutionEngine(
@@ -52,7 +56,7 @@ def create_app() -> FastAPI:
         risk_agent=risk_agent,
         audit_store=audit_store,
         paper_router=PaperOrderRouter(),
-        live_router=CcxtLiveOrderRouter(settings=settings.exchange, enabled=settings.execution.live_trading_enabled),
+        live_router=build_live_order_router(settings),
     )
     paper_trading_service = build_default_paper_trading_service(
         market_data=market_data_service,
@@ -95,6 +99,8 @@ def create_app() -> FastAPI:
     app.state.alert_service = alert_service
     app.state.paper_trading_service = paper_trading_service
     app.state.paper_scheduler = paper_scheduler
+    app.state.strategy_compiler = strategy_compiler
+    app.state.venue_catalog = venue_catalog
     app.state.auth_enabled = settings.auth.enabled
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
@@ -206,6 +212,70 @@ def create_app() -> FastAPI:
             "walk_forward": walk_forward_result.model_dump(mode="json"),
         }
 
+    async def _run_graph_backtest(payload: StrategyBacktestRequest) -> dict:
+        request = MarketDataRequest(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            lookback_bars=payload.lookback_bars,
+        )
+        raw_frame = await _fetch_market_frame(request, action_name="Strategy graph backtest")
+        try:
+            leakage_check = leakage_analyzer.assert_no_lookahead(raw_frame, feature_engineer)
+        except LookAheadBiasError as exc:
+            raise HTTPException(status_code=500, detail=f"Look-ahead bias detected in engineered features: {exc}") from exc
+
+        validation = strategy_compiler.validate_graph(payload.graph)
+        if not validation.passed:
+            raise HTTPException(status_code=422, detail=validation.issues)
+
+        strategy = strategy_compiler.compile_graph(payload.graph)
+        enriched = feature_engineer.enrich(raw_frame)
+        backtest_result = backtest_engine.run(
+            enriched,
+            strategy=strategy,
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+        )
+        walk_forward_result = walk_forward_validator.run(
+            enriched,
+            strategy=strategy,
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+        )
+        return {
+            "graph": payload.graph.model_dump(mode="json"),
+            "validation": validation.model_dump(mode="json"),
+            "leakage_check": leakage_check.model_dump(mode="json"),
+            "backtest": backtest_result.model_dump(mode="json"),
+            "walk_forward": walk_forward_result.model_dump(mode="json"),
+        }
+
+    async def _live_gate_summary() -> dict:
+        runs = await paper_scheduler.list_runs(limit=1000)
+        trade_events = await audit_store.list_trade_events(limit=1000)
+        completed_runs = [run for run in runs if run.status == "completed"]
+        active_run_days = sorted({run.started_at.date().isoformat() for run in completed_runs})
+        router_failures = sum(1 for run in runs if run.status == "failed")
+        risk_vetoes = sum(1 for event in trade_events if not event.risk_check_passed)
+        drawdown_breakers = sum(1 for event in trade_events if "drawdown" in event.risk_reason.lower())
+        first_started_at = min((run.started_at for run in completed_runs), default=None)
+        last_finished_at = max((run.finished_at for run in completed_runs if run.finished_at is not None), default=None)
+        return {
+            "runbook_documented": True,
+            "verification_artifacts_persisted": bool(runs or trade_events),
+            "paper_burn_in_days_observed": len(active_run_days),
+            "paper_burn_in_dates": active_run_days,
+            "fourteen_day_gate_passed": len(active_run_days) >= 14,
+            "twenty_eight_day_gate_passed": len(active_run_days) >= 28,
+            "risk_veto_count": risk_vetoes,
+            "drawdown_breaker_count": drawdown_breakers,
+            "router_failure_count": router_failures,
+            "live_trading_enabled": settings.execution.live_trading_enabled,
+            "configured_live_router": settings.execution.live_router,
+            "first_completed_run_started_at": first_started_at.isoformat() if first_started_at is not None else None,
+            "last_completed_run_finished_at": last_finished_at.isoformat() if last_finished_at is not None else None,
+        }
+
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         return RedirectResponse(url="/dashboard")
@@ -266,6 +336,30 @@ def create_app() -> FastAPI:
             timeframe=active_timeframe,
             lookback_bars=max(request.lookback_bars, _backtest_lookback_bars()),
         )
+        portfolio_view = portfolio_service.mark_to_market(price_map)
+        portfolio_breakdown = [
+            {
+                "symbol": position.symbol,
+                "market_value": position.market_value,
+                "unrealized_pnl": position.unrealized_pnl,
+                "realized_pnl": position.realized_pnl,
+                "weight_fraction": (position.market_value / portfolio_view.equity) if portfolio_view.equity else 0.0,
+            }
+            for position in portfolio_view.positions.values()
+        ]
+        walk_forward_windows = [
+            {
+                "train_start": window["train_start"],
+                "train_end": window["train_end"],
+                "test_start": window["test_start"],
+                "test_end": window["test_end"],
+                "total_return_fraction": window["result"]["metrics"]["total_return_fraction"],
+                "sharpe_ratio": window["result"]["metrics"]["sharpe_ratio"],
+                "max_drawdown_fraction": window["result"]["metrics"]["max_drawdown_fraction"],
+                "warnings": window["result"]["metrics"]["warnings"],
+            }
+            for window in backtest_summary["walk_forward"]["windows"]
+        ]
 
         return {
             "config": {
@@ -276,6 +370,7 @@ def create_app() -> FastAPI:
                 "provider_routing": settings.data.provider_routing,
                 "supported_timeframes": settings.data.supported_timeframes,
                 "exchange_id": settings.exchange.exchange_id,
+                "live_router": settings.execution.live_router,
                 "live_trading_enabled": settings.execution.live_trading_enabled,
             },
             "market": {
@@ -292,16 +387,27 @@ def create_app() -> FastAPI:
                 "recent_bars": recent_market,
             },
             "features": latest_features,
-            "portfolio": portfolio_service.mark_to_market(price_map).model_dump(mode="json"),
+            "portfolio": portfolio_view.model_dump(mode="json"),
+            "portfolio_breakdown": portfolio_breakdown,
             "alerts": [record.model_dump(mode="json") for record in alert_service.list_recent(limit=8)],
             "jobs": [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()],
             "runs": [run.model_dump(mode="json") for run in await paper_scheduler.list_runs(limit=8)],
             "trade_audit": [event.model_dump(mode="json") for event in await audit_store.list_trade_events(limit=8)],
+            "venues": venue_catalog.describe().model_dump(mode="json"),
+            "strategy_builder": {
+                "supported_indicators": ["ema", "rsi"],
+                "sample_prompt": (
+                    "Buy when EMA 20 crosses above EMA 50, only when price is above EMA 200 "
+                    "and RSI 14 is below 70, with stop loss 3%."
+                ),
+            },
             "backtest": {
                 "leakage_check": backtest_summary["leakage_check"],
                 "metrics": backtest_summary["backtest"]["metrics"],
                 "equity_curve": backtest_summary["backtest"]["equity_curve"][-80:],
                 "walk_forward_summary": backtest_summary["walk_forward"]["summary"],
+                "walk_forward_windows": walk_forward_windows,
+                "trades": backtest_summary["backtest"]["trades"][-12:],
             },
             "last_cycle": (
                 paper_trading_service.last_cycle.model_dump(mode="json")
@@ -333,9 +439,41 @@ def create_app() -> FastAPI:
             "supported_timeframes": settings.data.supported_timeframes,
             "exchange_id": settings.exchange.exchange_id,
             "paper_trading_timeframe": settings.paper_trading.default_cycle_timeframe,
+            "live_router": settings.execution.live_router,
             "live_trading_enabled": settings.execution.live_trading_enabled,
             "auth_enabled": settings.auth.enabled,
         }
+
+    @app.get("/venues/capabilities")
+    async def venue_capabilities(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
+        return venue_catalog.describe().model_dump(mode="json")
+
+    @app.get("/readiness/live-gate")
+    async def live_gate_readiness(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:
+        return await _live_gate_summary()
+
+    @app.post("/strategies/draft")
+    async def draft_strategy(
+        payload: StrategyDraftRequest,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
+        draft = strategy_compiler.draft_from_prompt(payload.prompt)
+        return draft.model_dump(mode="json")
+
+    @app.post("/strategies/validate")
+    async def validate_strategy(
+        payload: StrategyValidateRequest,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
+        validation = strategy_compiler.validate_graph(payload.graph)
+        return validation.model_dump(mode="json")
+
+    @app.post("/strategies/backtests")
+    async def backtest_strategy(
+        payload: StrategyBacktestRequest,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
+        return await _run_graph_backtest(payload)
 
     @app.get("/market-data/{symbol}")
     async def market_data(

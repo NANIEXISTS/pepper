@@ -91,5 +91,10 @@ def test_dashboard_data_route_returns_overview(monkeypatch, tmp_path: Path) -> N
     assert "jobs" in payload
     assert "runs" in payload
     assert "trade_audit" in payload
+    assert "venues" in payload
+    assert "portfolio_breakdown" in payload
+    assert "strategy_builder" in payload
     assert payload["backtest"]["leakage_check"]["passed"] is True
     assert "equity_curve" in payload["backtest"]
+    assert "walk_forward_windows" in payload["backtest"]
+    assert "trades" in payload["backtest"]

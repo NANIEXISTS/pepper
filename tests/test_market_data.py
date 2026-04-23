@@ -4,11 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import trading_ai.data.providers.alpaca as alpaca_provider_module
 import trading_ai.data.providers.ccxt as ccxt_provider_module
 from trading_ai.core.models import MarketBar, MarketDataRequest
 from trading_ai.data import MarketDataService, MarketDataUnavailableError
-from trading_ai.data.providers import CcxtMarketDataProvider, RoutingMarketDataProvider
-from trading_ai.settings import DataSettings, ExchangeSettings
+from trading_ai.data.providers import AlpacaMarketDataProvider, CcxtMarketDataProvider, RoutingMarketDataProvider
+from trading_ai.settings import AlpacaSettings, DataSettings, ExchangeSettings
 
 
 def _bar(*, timestamp: datetime, open_: float, high: float, low: float, close: float, volume: float) -> MarketBar:
@@ -237,3 +238,96 @@ async def test_ccxt_provider_rejects_missing_fetch_ohlcv_capability(monkeypatch)
 
     with pytest.raises(RuntimeError, match="fetchOHLCV support"):
         await provider.fetch_ohlcv(MarketDataRequest(symbol="BTC-USD", timeframe="1h", lookback_bars=60))
+
+
+class _FakeAlpacaResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.status_code = 200
+        self.text = ""
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self.payload
+
+
+class _FakeAlpacaClient:
+    def __init__(self, *, recorder: list[dict], payload: dict, timeout: float) -> None:
+        self.recorder = recorder
+        self.payload = payload
+        self.timeout = timeout
+
+    async def __aenter__(self) -> "_FakeAlpacaClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+        return None
+
+    async def get(self, url: str, params: dict | None = None, headers: dict | None = None) -> _FakeAlpacaResponse:
+        self.recorder.append({"url": url, "params": params or {}, "headers": headers or {}})
+        return _FakeAlpacaResponse(self.payload)
+
+
+@pytest.mark.asyncio
+async def test_alpaca_provider_fetches_stock_bars_with_auth(monkeypatch) -> None:
+    recorder: list[dict] = []
+
+    def _factory(*, timeout: float) -> _FakeAlpacaClient:
+        return _FakeAlpacaClient(
+            recorder=recorder,
+            payload={
+                "bars": {
+                    "AAPL": [
+                        {"t": "2025-01-01T15:00:00Z", "o": 189.0, "h": 190.0, "l": 188.5, "c": 189.5, "v": 1200.0}
+                    ]
+                }
+            },
+            timeout=timeout,
+        )
+
+    monkeypatch.setattr(alpaca_provider_module.httpx, "AsyncClient", _factory)
+    provider = AlpacaMarketDataProvider(
+        data_settings=DataSettings(request_timeout_seconds=5.0),
+        alpaca_settings=AlpacaSettings(api_key="key", api_secret="secret"),
+    )
+
+    bars = await provider.fetch_ohlcv(MarketDataRequest(symbol="AAPL", timeframe="1h", lookback_bars=60))
+
+    assert len(bars) == 1
+    assert bars[0].symbol == "AAPL"
+    assert recorder[0]["params"]["feed"] == "iex"
+    assert recorder[0]["headers"]["APCA-API-KEY-ID"] == "key"
+
+
+@pytest.mark.asyncio
+async def test_alpaca_provider_fetches_crypto_bars_without_auth(monkeypatch) -> None:
+    recorder: list[dict] = []
+
+    def _factory(*, timeout: float) -> _FakeAlpacaClient:
+        return _FakeAlpacaClient(
+            recorder=recorder,
+            payload={
+                "bars": {
+                    "BTC/USD": [
+                        {"t": "2025-01-01T15:00:00Z", "o": 100000.0, "h": 100500.0, "l": 99500.0, "c": 100200.0, "v": 42.0}
+                    ]
+                }
+            },
+            timeout=timeout,
+        )
+
+    monkeypatch.setattr(alpaca_provider_module.httpx, "AsyncClient", _factory)
+    provider = AlpacaMarketDataProvider(
+        data_settings=DataSettings(request_timeout_seconds=5.0),
+        alpaca_settings=AlpacaSettings(),
+    )
+
+    bars = await provider.fetch_ohlcv(MarketDataRequest(symbol="BTC-USD", timeframe="1h", lookback_bars=60))
+
+    assert len(bars) == 1
+    assert bars[0].symbol == "BTC-USD"
+    assert "/v1beta3/crypto/us/bars" in recorder[0]["url"]
+    assert recorder[0]["params"]["symbols"] == "BTC/USD"
+    assert recorder[0]["headers"] == {}

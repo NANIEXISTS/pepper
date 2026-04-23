@@ -3,6 +3,7 @@
 from .exceptions import MarketDataUnavailableError
 from .service import MarketDataService
 from .providers import (
+    AlpacaMarketDataProvider,
     CcxtMarketDataProvider,
     MarketDataProvider,
     RoutingMarketDataProvider,
@@ -11,6 +12,7 @@ from .providers import (
 )
 
 __all__ = [
+    "AlpacaMarketDataProvider",
     "CcxtMarketDataProvider",
     "MarketDataProvider",
     "MarketDataService",

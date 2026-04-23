@@ -156,6 +156,46 @@
         </article>
       </section>
 
+      <section class="builder-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Build / Validate / Run</p>
+              <h2>Strategy Draft</h2>
+            </div>
+          </div>
+          <form id="strategy-form" class="strategy-form">
+            <label>
+              Natural-language strategy
+              <textarea
+                id="strategy-prompt-input"
+                rows="6"
+              >Buy when EMA 20 crosses above EMA 50, only when price is above EMA 200 and RSI 14 is below 70, with stop loss 3%.</textarea>
+            </label>
+            <div class="job-actions">
+              <button id="strategy-draft-button" class="button subtle" type="submit">Build Graph</button>
+              <button id="strategy-validate-button" class="button subtle" type="button">Validate</button>
+              <button id="strategy-backtest-button" class="button primary" type="button">Run Research</button>
+            </div>
+            <p id="strategy-status" class="metric-subtext">
+              Draft a strategy into a typed graph first. Nothing here places orders.
+            </p>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Compiled Graph</p>
+              <h2>Inspectable Strategy</h2>
+            </div>
+          </div>
+          <div id="strategy-graph" class="definition-list">
+            <p class="table-empty">Build a strategy to inspect its graph, rules, and risk policy.</p>
+          </div>
+        </article>
+      </section>
+
       <section class="metrics-grid">
         <article class="metric-card panel">
           <span class="metric-label">Portfolio Equity</span>
@@ -226,7 +266,7 @@
           <div class="panel-header">
             <div>
               <p class="panel-label">Research Equity Curve</p>
-              <h2>EMA Backtest</h2>
+              <h2 id="research-title">EMA Backtest</h2>
             </div>
             <div class="panel-highlight">
               <span>Max drawdown</span>
@@ -356,6 +396,54 @@
           </div>
           <div id="trade-audit-list" class="alert-list">
             <p class="table-empty">No trade decisions yet.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Research</p>
+              <h2>Walk-Forward Windows</h2>
+            </div>
+          </div>
+          <div id="walk-forward-list" class="alert-list">
+            <p class="table-empty">Windows will appear after research is loaded.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Research</p>
+              <h2>Trade Sample</h2>
+            </div>
+          </div>
+          <div id="research-trades-list" class="alert-list">
+            <p class="table-empty">Backtest trades will appear here.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Portfolio</p>
+              <h2>Allocation &amp; PnL</h2>
+            </div>
+          </div>
+          <div id="portfolio-breakdown-list" class="alert-list">
+            <p class="table-empty">No allocation yet.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Venues</p>
+              <h2>Capabilities</h2>
+            </div>
+          </div>
+          <div id="venues-list" class="alert-list">
+            <p class="table-empty">Venue capabilities will load with the dashboard.</p>
           </div>
         </article>
       </section>

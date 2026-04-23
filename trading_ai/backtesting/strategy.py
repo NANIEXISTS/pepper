@@ -11,10 +11,12 @@ class EmaCrossoverStrategy:
     long_window: int = 50
     trend_filter_window: int = 200
     long_only: bool = True
+    entry_rsi_max: float | None = None
 
     @property
     def name(self) -> str:
-        return f"ema-crossover-{self.short_window}-{self.long_window}"
+        suffix = f"-rsi-{int(self.entry_rsi_max)}" if self.entry_rsi_max is not None else ""
+        return f"ema-crossover-{self.short_window}-{self.long_window}{suffix}"
 
     def generate_target_position(self, frame: pd.DataFrame) -> pd.Series:
         self._validate(frame)
@@ -22,8 +24,11 @@ class EmaCrossoverStrategy:
         fast = close.ewm(span=self.short_window, adjust=False).mean()
         slow = close.ewm(span=self.long_window, adjust=False).mean()
         trend = close.ewm(span=self.trend_filter_window, adjust=False).mean()
+        rsi = self._rsi(close, 14)
 
         long_condition = (fast > slow) & (close >= trend)
+        if self.entry_rsi_max is not None:
+            long_condition &= rsi < self.entry_rsi_max
         target = pd.Series(0.0, index=frame.index, dtype="float64")
         target.loc[long_condition] = 1.0
 
@@ -44,3 +49,14 @@ class EmaCrossoverStrategy:
             raise ValueError("Strategy requires timezone-aware timestamps.")
         if not frame.index.is_monotonic_increasing:
             raise ValueError("Strategy requires time-ordered data.")
+
+    @staticmethod
+    def _rsi(close: pd.Series, window: int) -> pd.Series:
+        delta = close.diff()
+        gains = delta.clip(lower=0.0)
+        losses = -delta.clip(upper=0.0)
+        average_gain = gains.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
+        average_loss = losses.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
+        relative_strength = average_gain / average_loss.replace(0.0, pd.NA)
+        rsi = 100 - (100 / (1 + relative_strength))
+        return rsi.fillna(50.0)

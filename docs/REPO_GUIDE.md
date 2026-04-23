@@ -9,8 +9,10 @@ Treat this repository as one product with one active backend architecture. Do no
 - Put API code in `trading_ai/api/`.
 - Put shared typed models in `trading_ai/core/`.
 - Put data providers and normalization in `trading_ai/data/`.
+- Put venue capability metadata and symbol/timeframe normalization helpers in `trading_ai/venues/`.
 - Put feature engineering in `trading_ai/features/`.
 - Put baseline strategies, leakage checks, and validation logic in `trading_ai/backtesting/`.
+- Put typed strategy graph compilation in `trading_ai/strategy_builder/`.
 - Put agent logic in `trading_ai/agents/`.
 - Put portfolio accounting in `trading_ai/portfolio/`.
 - Put orchestration services in `trading_ai/orchestration/`.
@@ -38,6 +40,7 @@ Treat this repository as one product with one active backend architecture. Do no
 - Reject synchronous HTTP calls in async paths.
 - Reject hardcoded thresholds that belong in `config.yaml`.
 - Reject features that use future data.
+- Reject strategy-authoring flows that jump straight from prompt text to order placement.
 - Reject live trading changes without paper-trading coverage and tests.
 
 ## Security rules

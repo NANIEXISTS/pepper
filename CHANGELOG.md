@@ -2,6 +2,19 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.7.0] - 2026-04-23
+
+### Added
+
+- Alpaca market-data adapter for equities and crypto using async `httpx`
+- Alpaca live-router foundation behind the same execution boundary as the existing ccxt router
+- Venue capability catalog and `/venues/capabilities` API for provider/router inspection
+- Deterministic strategy-builder package with typed strategy graphs, validation, and prompt compilation
+- Strategy-builder API endpoints for draft, validate, and backtest flows
+- Live-gate readiness summary endpoint and operational runbook in `docs/OPERATIONAL_READINESS.md`
+- Dashboard build/validate/run strategy workflow, venue capability review, walk-forward inspection, and richer trade/run drill-downs
+- Tests for Alpaca provider/router integration, strategy compilation, and the new API surfaces
+
 ## [0.6.0] - 2026-04-23
 
 ### Added

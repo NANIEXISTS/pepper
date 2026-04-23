@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-from ...settings import DataSettings, ExchangeSettings
+from ...settings import AlpacaSettings, DataSettings, ExchangeSettings
+from .alpaca import AlpacaMarketDataProvider
 from .base import MarketDataProvider
 from .ccxt import CcxtMarketDataProvider
 from .routing import RoutingMarketDataProvider
 from .yahoo import YahooFinanceProvider
 
 
-def build_market_data_provider(data_settings: DataSettings, exchange_settings: ExchangeSettings) -> MarketDataProvider:
+def build_market_data_provider(
+    data_settings: DataSettings,
+    exchange_settings: ExchangeSettings,
+    alpaca_settings: AlpacaSettings,
+) -> MarketDataProvider:
     provider_catalog: dict[str, MarketDataProvider] = {
         "ccxt": CcxtMarketDataProvider(data_settings, exchange_settings),
+        "alpaca": AlpacaMarketDataProvider(data_settings, alpaca_settings),
         "yahoo": YahooFinanceProvider(data_settings),
     }
     configured_provider = data_settings.provider.lower()

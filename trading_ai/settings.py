@@ -23,9 +23,21 @@ class ExchangeSettings(BaseModel):
     api_password: Optional[str] = None
 
 
+class AlpacaSettings(BaseModel):
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    data_base_url: str = "https://data.alpaca.markets"
+    paper_trading_base_url: str = "https://paper-api.alpaca.markets"
+    live_trading_base_url: str = "https://api.alpaca.markets"
+    crypto_location: Literal["us", "us-1", "us-2", "eu-1", "bs-1"] = "us"
+    stock_feed: Literal["iex", "sip", "boats", "otc"] = "iex"
+    equity_time_in_force: str = "day"
+    crypto_time_in_force: str = "gtc"
+
+
 class DataSettings(BaseModel):
     provider: str = "router"
-    provider_routing: list[str] = Field(default_factory=lambda: ["ccxt", "yahoo"])
+    provider_routing: list[str] = Field(default_factory=lambda: ["ccxt", "alpaca", "yahoo"])
     base_url: str = "https://query1.finance.yahoo.com"
     request_timeout_seconds: float = Field(default=10.0, gt=0.0)
     supported_timeframes: list[str] = Field(default_factory=lambda: ["5m", "15m", "1h", "4h", "1d"])
@@ -47,6 +59,7 @@ class ExecutionSettings(BaseModel):
     default_order_type: OrderType = OrderType.LIMIT
     market_fallback_seconds: int = Field(default=3, ge=1, le=120)
     live_trading_enabled: bool = False
+    live_router: str = "ccxt"
 
 
 class PaperTradingSettings(BaseModel):
@@ -113,6 +126,7 @@ class TradingSettings(BaseModel):
     default_symbol: str = "BTC-USD"
     api: ApiSettings = Field(default_factory=ApiSettings)
     exchange: ExchangeSettings = Field(default_factory=ExchangeSettings)
+    alpaca: AlpacaSettings = Field(default_factory=AlpacaSettings)
     data: DataSettings = Field(default_factory=DataSettings)
     risk: RiskSettings = Field(default_factory=RiskSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)

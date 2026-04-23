@@ -125,6 +125,7 @@ table th {
 }
 
 .toolbar,
+.builder-grid,
 .operator-grid,
 .status-strip,
 .metrics-grid,
@@ -155,13 +156,19 @@ table th {
 }
 
 input,
-select {
+select,
+textarea {
   min-width: 150px;
   border: 1px solid rgba(168, 185, 216, 0.2);
   border-radius: 14px;
   background: rgba(7, 10, 16, 0.55);
   color: var(--text-main);
   padding: 12px 14px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 140px;
 }
 
 .toolbar-actions {
@@ -203,6 +210,11 @@ select {
 }
 
 .operator-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.builder-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 18px;
 }
@@ -260,6 +272,17 @@ select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.strategy-form {
+  display: grid;
+  gap: 14px;
+}
+
+.strategy-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
 }
 
 .form-grid label {
@@ -464,6 +487,61 @@ th:last-child {
   font-size: 0.82rem;
 }
 
+.details-block {
+  margin-top: 12px;
+  border-top: 1px solid rgba(168, 185, 216, 0.08);
+  padding-top: 12px;
+}
+
+.details-block summary {
+  cursor: pointer;
+  color: var(--text-soft);
+}
+
+.json-block {
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(7, 10, 16, 0.65);
+  color: #d5dfef;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.definition-list {
+  display: grid;
+  gap: 16px;
+}
+
+.definition-group {
+  padding: 16px 18px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(168, 185, 216, 0.08);
+}
+
+.definition-group h3 {
+  margin: 0 0 8px;
+}
+
+.definition-group p {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.split-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.split-list strong {
+  display: block;
+}
+
 .positive {
   color: #7cf4c7;
 }
@@ -478,6 +556,7 @@ th:last-child {
   }
 
   .content-grid,
+  .builder-grid,
   .operator-grid {
     grid-template-columns: 1fr;
   }
@@ -486,6 +565,7 @@ th:last-child {
 @media (max-width: 900px) {
   .hero,
   .toolbar,
+  .builder-grid,
   .operator-grid,
   .status-strip,
   .metrics-grid,
@@ -504,6 +584,10 @@ th:last-child {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .split-list {
     grid-template-columns: 1fr;
   }
 }

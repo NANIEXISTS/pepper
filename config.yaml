@@ -13,10 +13,22 @@ exchange:
   api_secret: null
   api_password: null
 
+alpaca:
+  api_key: null
+  api_secret: null
+  data_base_url: https://data.alpaca.markets
+  paper_trading_base_url: https://paper-api.alpaca.markets
+  live_trading_base_url: https://api.alpaca.markets
+  crypto_location: us
+  stock_feed: iex
+  equity_time_in_force: day
+  crypto_time_in_force: gtc
+
 data:
   provider: router
   provider_routing:
     - ccxt
+    - alpaca
     - yahoo
   base_url: https://query1.finance.yahoo.com
   request_timeout_seconds: 10.0
@@ -46,6 +58,7 @@ execution:
   default_order_type: limit
   market_fallback_seconds: 3
   live_trading_enabled: false
+  live_router: ccxt
 
 paper_trading:
   starting_cash: 100000.0

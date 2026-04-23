@@ -3,125 +3,140 @@
 [![CI](https://github.com/NANIEXISTS/pepper/actions/workflows/ci.yml/badge.svg)](https://github.com/NANIEXISTS/pepper/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![Mode](https://img.shields.io/badge/default-paper%20trading-success)
-![Architecture](https://img.shields.io/badge/architecture-multi--agent%20trading-black)
+![Safety](https://img.shields.io/badge/risk-gated-execution-black)
 
-Production-oriented AI trading platform focused on safe build order, explainable decisions, leakage-aware research, and risk-gated execution.
+Pepper is a production-shaped AI trading platform focused on one thing first: making research, paper trading, and operator decisions hard to fake and easy to audit.
 
-The repository now contains the implementation layers for:
+It is designed around a strict path:
 
-- Phase 1: data, config, persistence, API, risk-gated execution
-- Phase 2: deterministic features, EMA baseline, walk-forward backtesting, leakage checks
-- Phase 3: portfolio state, alerts, paper-trading cycle orchestration
-- Phase 3.5: scheduled paper-trading control plane with persisted jobs and run history
-- Phase 3.75: writable operator console with manual paper orders, trade audit, and restart-safe portfolio state
-- Phase 4: analyst, debate, strategy, and trader agents
-- Phase 5: execution-timing RL primitives and policy hooks
-- Phase 6 foundation: guarded ccxt live-router with capability checks and sandbox support
+- build strategies into typed graphs
+- validate them before trusting them
+- backtest them with walk-forward inspection
+- run them in paper mode behind the same execution engine
+- keep live trading disabled until the real-world gate is satisfied
 
-Phase 6 is not operationally complete yet. The code path exists, but the real-world safety gates still require verified paper-trading duration and live capital ramp-up.
+## What Pepper is
 
-## Why this repo exists
+Pepper is not a toy "LLM buys candles" repo. It combines:
 
-Most "AI trading bot" projects fail for predictable reasons:
+- deterministic data normalization
+- leakage-aware research
+- a writable paper-trading control plane
+- multi-agent paper-cycle analysis
+- mandatory risk gating before every order
+- operator auth and audit trails
+- inspectable venue capabilities
 
-- they skip risk controls
-- they trust biased backtests
-- they blur research code with production code
-- they let strategy logic leak into data ingestion
-- they add live trading long before paper trading is trustworthy
+## What is actually ready
 
-Pepper is structured to avoid those failures by default.
+Ready now:
 
-## What it does today
+- local or secured paper-mode operation
+- scheduled paper jobs and persisted run history
+- manual paper orders through the execution engine
+- strategy drafting from natural language into a typed graph
+- strategy validation and backtesting through the existing research path
+- routed market data across `ccxt`, Alpaca, and Yahoo fallback
+- operator dashboard review of jobs, runs, trade audit, walk-forward windows, and venue assumptions
 
-- Serves a FastAPI backend with market-data, feature, backtest, paper-order, portfolio, alert, and paper-cycle endpoints
-- Serves an operator console at `/dashboard` for portfolio, research, alerts, and agent-cycle monitoring
-- Supports writable paper-mode operator actions: create jobs, start/pause jobs, run jobs on demand, and submit manual paper orders
-- Schedules recurring paper cycles with persisted job state and run history
-- Routes market data across `ccxt` and Yahoo with fallback handling
-- Uses last-good snapshot fallback for read paths and explicit `503` failures when fresh market data is unavailable
-- Normalizes market data asynchronously and rejects malformed OHLCV before features or trading logic see it
-- Computes deterministic bar-close features
-- Runs leakage-aware backtests with walk-forward validation
-- Tracks portfolio cash, equity, positions, and daily PnL anchor
-- Executes every order through a mandatory `RiskAuditAgent`
-- Stores audit records for trade decisions and execution outcomes
-- Supports role-gated operator authentication for read-only vs writable controls
-- Runs a multi-agent paper-trading loop with explainable debate traces
-- Exposes a guarded live-routing foundation through ccxt without enabling live trading by default
+Not ready yet:
 
-## System view
+- live-money deployment
+- 14-day and 28-day paper burn-in completion
+- exchange permission audit for live credentials
+- live capital ramp
+
+That boundary is deliberate. The code path exists for live-routing foundations, but the operational gate is still real.
+
+## Product surface
+
+### Build
+
+- Draft a strategy in plain language
+- Compile it into a typed graph with explicit indicators, rules, and risk policy
+- Block ambiguous prompts, unsupported indicators, and missing stop-loss rules
+
+### Validate
+
+- Inspect the compiled graph before using it
+- Run leakage checks and walk-forward validation
+- Review strategy warnings, per-window metrics, and trade samples
+
+### Run
+
+- Execute paper cycles only through the backend execution engine
+- Enforce `RiskAuditAgent.run()` before every order
+- Persist fills, vetoes, failures, and operator actions
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["Market Data"] --> B["Feature Engineering"]
-    B --> C["Analyst Agent"]
-    C --> D["Debate Layer"]
-    D --> E["Strategy Agent"]
-    E --> F["Trader Agent"]
-    F --> G["RiskAuditAgent"]
-    G --> H["ExecutionEngine"]
-    H --> I["Paper Router"]
-    H --> J["Guarded CCXT Live Router"]
-    H --> K["Portfolio Service"]
-    H --> L["Audit Store"]
-    K --> M["API / Portfolio / Alerts"]
-    B --> N["Backtesting Engine"]
-    N --> O["Walk-Forward Validation"]
-    B --> P["Leakage Analyzer"]
+    A["Venue Data: ccxt / Alpaca / Yahoo"] --> B["Normalized OHLCV"]
+    B --> C["Feature Engineering"]
+    C --> D["Strategy Builder"]
+    D --> E["Backtest + Walk-Forward"]
+    C --> F["Analyst Agent"]
+    F --> G["Debate Layer"]
+    G --> H["Strategy Agent"]
+    H --> I["Trader Agent"]
+    I --> J["RiskAuditAgent"]
+    J --> K["ExecutionEngine"]
+    K --> L["Paper Router"]
+    K --> M["Live Router Foundation"]
+    K --> N["Portfolio + Audit Store"]
+    N --> O["Dashboard / API / Readiness"]
 ```
 
-## Safety model
+## Why this is different
 
-The repo is built around a few hard rules:
+Most GitHub trading repos fail in predictable ways:
 
-- No order should exist outside `ExecutionEngine.place_order()`
-- No trade should bypass `RiskAuditAgent.run()`
-- No backtest should be trusted without leakage checks and walk-forward evaluation
-- No live trading should be enabled before paper-trading gates pass in the real world
-- RL may affect execution timing, not market direction
+- strategy logic leaks into the data layer
+- backtests use future information
+- UI actions become hidden order paths
+- risk checks are bolted on late or bypassed
+- live trading gets enabled before paper evidence exists
 
-## Data routing
+Pepper is structured to reject those shortcuts.
 
-- Default market-data mode is routed: `ccxt` first, Yahoo fallback
-- `ccxt` capability checks require `fetchOHLCV` support before use
-- Duplicate timestamps and malformed candles are rejected
-- Intraday gaps are surfaced as warnings instead of passing silently
-- Last-good snapshots can serve read-only flows during transient outages and are marked explicitly as stale
-- Yahoo remains available as a fallback for symbols or venues the exchange path cannot satisfy
+## Data and venue model
 
-## Operator auth
+Market-data paths:
 
-- Optional HTTP Basic authentication can protect the dashboard and API
-- Roles are hierarchical: `viewer`, `trader`, `admin`
-- Read routes require viewer access when auth is enabled
-- Writable paper-trading routes require trader access when auth is enabled
-- Operator auth failures and privileged actions are written to the operator-audit trail
-- Keep credentials out of the repo; enable auth through local config or `.env` only
+- `ccxt` for exchange-grade crypto OHLCV, with capability checks
+- Alpaca for equities and crypto market data through async HTTP
+- Yahoo as a fallback, not the primary execution-grade source
 
-## Repo layout
+Execution paths:
 
-```text
-config.yaml                 Runtime settings
-docs/                       Architecture and repo operating rules
-scripts/                    Local helper scripts
-tests/                      Automated tests
-trading_ai/
-  agents/                   Analyst, debate, strategy, and trader agents
-  alerts/                   Alert history service
-  api/                      FastAPI app
-  backtesting/              Baseline strategy, leakage checks, walk-forward backtests
-  core/                     Shared enums and typed models
-  data/                     Async market-data providers and normalization
-  execution/                Routers and risk-gated execution engine
-  features/                 Deterministic feature engineering
-  llm/                      Optional LLM client layer
-  orchestration/            Paper-trading orchestration
-  portfolio/                Portfolio accounting
-  persistence/              Audit logging and DB models
-  reinforcement/            Execution-timing environment and policy hooks
-  risk/                     Risk policy enforcement
-```
+- paper router for default operation
+- ccxt live-router foundation
+- Alpaca live-router foundation
+
+Inspect venue assumptions directly:
+
+- `GET /venues/capabilities`
+
+Review live-readiness state directly:
+
+- `GET /readiness/live-gate`
+
+## Operator and safety model
+
+Hard invariants:
+
+- no order path exists outside `ExecutionEngine.place_order()`
+- no trade bypasses `RiskAuditAgent.run()`
+- no prompt executes directly into trading
+- no backtest is trusted without leakage checks and walk-forward context
+- live trading remains off until the burn-in gate is satisfied in the real world
+
+Auth model:
+
+- `viewer`: read-only API and dashboard access
+- `trader`: paper actions
+- `admin`: operator-audit inspection
 
 ## Quick start
 
@@ -137,87 +152,93 @@ python -m pip install -e .[dev]
 python -m pytest -q
 ```
 
-### 3. Start the API
+### 3. Start Pepper
 
 ```powershell
 python -m trading_ai.main
 ```
 
-Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the operator console.
+Then open:
 
-### 4. Useful helper scripts
+- [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard)
+- [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-```powershell
-.\scripts\bootstrap.ps1
-.\scripts\test.ps1
-.\scripts\run-api.ps1
-.\scripts\clean.ps1
+## API highlights
+
+Operator:
+
+- `GET /dashboard`
+- `GET /dashboard/data`
+- `GET /auth/session`
+- `GET /config`
+- `GET /venues/capabilities`
+- `GET /readiness/live-gate`
+
+Research:
+
+- `GET /market-data/{symbol}`
+- `GET /features/{symbol}`
+- `GET /backtests/ema/{symbol}`
+- `POST /strategies/draft`
+- `POST /strategies/validate`
+- `POST /strategies/backtests`
+
+Paper operations:
+
+- `POST /paper/cycles/{symbol}`
+- `GET /paper/jobs`
+- `POST /paper/jobs`
+- `POST /paper/jobs/{job_id}/start`
+- `POST /paper/jobs/{job_id}/pause`
+- `POST /paper/jobs/{job_id}/run`
+- `GET /paper/runs`
+- `POST /paper/orders/manual`
+
+Audit:
+
+- `GET /audit/trades`
+- `GET /audit/operators`
+- `GET /alerts`
+- `GET /portfolio`
+
+## Repo layout
+
+```text
+config.yaml
+docs/
+scripts/
+tests/
+trading_ai/
+  agents/
+  alerts/
+  api/
+  backtesting/
+  core/
+  data/
+  execution/
+  features/
+  llm/
+  orchestration/
+  persistence/
+  portfolio/
+  reinforcement/
+  risk/
+  strategy_builder/
+  venues/
 ```
-
-## API surface
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /health` | service health and mode |
-| `GET /dashboard` | operator console UI |
-| `GET /dashboard/data` | aggregated dashboard read model |
-| `GET /auth/session` | current operator role and auth mode |
-| `GET /config` | effective runtime summary |
-| `GET /market-data/{symbol}` | normalized OHLCV preview |
-| `GET /features/{symbol}` | latest engineered features |
-| `GET /backtests/ema/{symbol}` | EMA baseline backtest plus walk-forward summary |
-| `POST /orders/paper` | manual paper order through the execution engine |
-| `POST /paper/cycles/{symbol}` | full multi-agent paper-trading cycle |
-| `GET /portfolio` | current portfolio state |
-| `GET /alerts` | recent operator alerts |
-| `GET /paper/jobs` | list scheduled paper-cycle jobs |
-| `POST /paper/jobs` | create a scheduled paper-cycle job |
-| `POST /paper/jobs/{job_id}/start` | resume a scheduled paper-cycle job |
-| `POST /paper/jobs/{job_id}/pause` | pause a scheduled paper-cycle job |
-| `POST /paper/jobs/{job_id}/run` | run a scheduled job once on demand |
-| `GET /paper/runs` | list persisted paper-cycle run history |
-| `POST /paper/orders/manual` | submit a manual paper order using live market context |
-| `GET /audit/trades` | list recent trade decisions, fills, and vetoes |
-| `GET /audit/operators` | list operator auth and privileged-action audit events |
-
-## Current verification status
-
-- `pytest` passing locally
-- FastAPI app smoke-tested
-- Backtesting route implemented
-- Paper-trading cycle route implemented
-- Market-data outage handling returns stale-read metadata or explicit `503`s
-- Auth and role checks cover the writable operator surface
-- Live router still disabled by default
-
-## Roadmap status
-
-- [x] Phase 1 foundation
-- [x] Phase 2 research and backtesting core
-- [x] Phase 3 paper-trading architecture
-- [x] Phase 3.5 paper-trading control plane
-- [x] Phase 3.75 writable operator console
-- [x] Phase 4 multi-agent architecture
-- [x] Phase 5 RL execution-timing architecture
-- [ ] Phase 6 real-world verification gates
-
-Phase 6 remains open until:
-
-1. paper trading runs for the required real-world duration
-2. live exchange permissions are audited
-3. live capital is ramped gradually after paper verification
 
 ## Repo rules
 
-- Keep strategy logic out of the data layer
-- Keep thresholds in `config.yaml`, not hardcoded in logic
-- Keep network and database paths async
-- Keep live routing disabled until operational gates pass
-- Add tests with each new module
-- Remove dead scaffolding instead of keeping parallel systems around
+- keep strategy logic out of the data layer
+- keep thresholds in `config.yaml`
+- keep all network and database I/O async
+- keep paper and live behind the same execution engine
+- add tests with each module
+- do not claim live readiness before the burn-in gate is actually satisfied
 
 ## Documentation
 
-- [Changelog](CHANGELOG.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Operational Readiness](docs/OPERATIONAL_READINESS.md)
 - [Repo Guide](docs/REPO_GUIDE.md)
+- [Changelog](CHANGELOG.md)
