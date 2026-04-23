@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from typing import Optional
 
 from ..agents import AnalystAgent, BearAgent, BullAgent, DebateLayer, StrategyAgent, TraderAgent
@@ -30,82 +31,88 @@ class PaperTradingService:
     debate_layer: DebateLayer
     paper_settings: PaperTradingSettings
     last_cycle: Optional[PaperTradingCycleResult] = None
+    _symbol_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
     async def run_cycle(self, symbol: str, timeframe: str, lookback_bars: int) -> PaperTradingCycleResult:
-        request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
-        frame = await self.market_data.fetch_dataframe(request)
-        enriched = self.feature_engineer.enrich(frame)
-        latest_price = float(enriched.iloc[-1]["close"])
-        portfolio_view = self.portfolio_service.mark_to_market({symbol: latest_price})
+        lock = self._symbol_locks.setdefault(symbol, asyncio.Lock())
+        if lock.locked():
+            raise RuntimeError(f"Paper cycle already running for {symbol}.")
 
-        context = AgentContext(
-            symbol=symbol,
-            timeframe=timeframe,
-            market_frame=frame,
-            features=enriched,
-            portfolio_equity=portfolio_view.equity,
-            available_cash=portfolio_view.cash,
-            positions=portfolio_view.positions,
-            metadata={"latest_price": latest_price},
-        )
-        analysis = await self.analyst_agent.run(context)
-        debate = await self.debate_layer.run(context, analysis)
-        strategy = await self.strategy_agent.run(context, analysis, debate)
-        order = await self.trader_agent.run(context, strategy)
+        async with lock:
+            request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
+            frame = await self.market_data.fetch_dataframe(request)
+            enriched = self.feature_engineer.enrich(frame)
+            latest_price = float(enriched.iloc[-1]["close"])
+            portfolio_view = self.portfolio_service.mark_to_market({symbol: latest_price})
 
-        report = None
-        if order is not None:
-            report = await self.execution_engine.place_order(
-                agent_name="trader-agent",
-                signal=strategy.signal,
+            context = AgentContext(
+                symbol=symbol,
+                timeframe=timeframe,
+                market_frame=frame,
+                features=enriched,
+                portfolio_equity=portfolio_view.equity,
+                available_cash=portfolio_view.cash,
+                positions=portfolio_view.positions,
+                metadata={"latest_price": latest_price},
+            )
+            analysis = await self.analyst_agent.run(context)
+            debate = await self.debate_layer.run(context, analysis)
+            strategy = await self.strategy_agent.run(context, analysis, debate)
+            order = await self.trader_agent.run(context, strategy)
+
+            report = None
+            if order is not None:
+                report = await self.execution_engine.place_order(
+                    agent_name="trader-agent",
+                    signal=strategy.signal,
+                    confidence=strategy.confidence,
+                    rationale=strategy.rationale,
+                    order=order,
+                    portfolio=self.portfolio_service.snapshot({symbol: latest_price}),
+                    metadata={
+                        **strategy.metadata,
+                        **order.metadata,
+                        "analysis_confidence": analysis.confidence,
+                    },
+                )
+                if report.status == OrderStatus.FILLED:
+                    self.portfolio_service.apply_fill(order, report)
+
+            updated_portfolio = self.portfolio_service.mark_to_market({symbol: latest_price})
+            alert_level = "info"
+            alert_message = "No trade executed."
+            if report is not None and report.status == OrderStatus.FILLED:
+                alert_message = f"Paper trade filled for {symbol}."
+            elif report is not None and report.status == OrderStatus.REJECTED:
+                alert_level = "warning"
+                alert_message = f"Trade rejected for {symbol}."
+
+            alert = self.alert_service.emit(
+                alert_level,
+                alert_message,
+                symbol=symbol,
+                signal=strategy.signal.value,
                 confidence=strategy.confidence,
-                rationale=strategy.rationale,
-                order=order,
-                portfolio=self.portfolio_service.snapshot({symbol: latest_price}),
+                execution_status=report.status.value if report is not None else "none",
+            )
+
+            result = PaperTradingCycleResult(
+                symbol=symbol,
+                timeframe=timeframe,
+                latest_price=latest_price,
+                portfolio=updated_portfolio,
+                analysis=analysis,
+                debate=debate,
+                strategy=strategy,
+                execution_report=report,
+                alert=alert,
                 metadata={
-                    **strategy.metadata,
-                    **order.metadata,
-                    "analysis_confidence": analysis.confidence,
+                    "trade_executed": report is not None and report.status == OrderStatus.FILLED,
+                    "trade_rejected": report is not None and report.status == OrderStatus.REJECTED,
                 },
             )
-            if report.status == OrderStatus.FILLED:
-                self.portfolio_service.apply_fill(order, report)
-
-        updated_portfolio = self.portfolio_service.mark_to_market({symbol: latest_price})
-        alert_level = "info"
-        alert_message = "No trade executed."
-        if report is not None and report.status == OrderStatus.FILLED:
-            alert_message = f"Paper trade filled for {symbol}."
-        elif report is not None and report.status == OrderStatus.REJECTED:
-            alert_level = "warning"
-            alert_message = f"Trade rejected for {symbol}."
-
-        alert = self.alert_service.emit(
-            alert_level,
-            alert_message,
-            symbol=symbol,
-            signal=strategy.signal.value,
-            confidence=strategy.confidence,
-            execution_status=report.status.value if report is not None else "none",
-        )
-
-        result = PaperTradingCycleResult(
-            symbol=symbol,
-            timeframe=timeframe,
-            latest_price=latest_price,
-            portfolio=updated_portfolio,
-            analysis=analysis,
-            debate=debate,
-            strategy=strategy,
-            execution_report=report,
-            alert=alert,
-            metadata={
-                "trade_executed": report is not None and report.status == OrderStatus.FILLED,
-                "trade_rejected": report is not None and report.status == OrderStatus.REJECTED,
-            },
-        )
-        self.last_cycle = result
-        return result
+            self.last_cycle = result
+            return result
 
 
 def build_default_paper_trading_service(

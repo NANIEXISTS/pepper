@@ -19,7 +19,7 @@ from ..execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
 from ..features import FeatureEngineer
 from ..llm import LLMClient
 from ..logging_config import configure_logging
-from ..orchestration import build_default_paper_trading_service
+from ..orchestration import PaperCycleJobCreate, PaperTradingScheduler, build_default_paper_trading_service
 from ..persistence import TradeAuditStore
 from ..portfolio import PortfolioService
 from ..reinforcement import ExecutionTimingCoordinator
@@ -60,13 +60,20 @@ def create_app() -> FastAPI:
         risk_settings=settings.risk,
         execution_timing=execution_timing,
     )
+    paper_scheduler = PaperTradingScheduler(
+        paper_trading_service=paper_trading_service,
+        audit_store=audit_store,
+        alert_service=alert_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await audit_store.create_schema()
+        await paper_scheduler.initialize()
         try:
             yield
         finally:
+            await paper_scheduler.close()
             await audit_store.close()
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -78,6 +85,7 @@ def create_app() -> FastAPI:
     app.state.portfolio_service = portfolio_service
     app.state.alert_service = alert_service
     app.state.paper_trading_service = paper_trading_service
+    app.state.paper_scheduler = paper_scheduler
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
     app.mount("/assets", StaticFiles(directory=dashboard_dir), name="dashboard-assets")
@@ -196,6 +204,8 @@ def create_app() -> FastAPI:
             "features": latest_features,
             "portfolio": portfolio_service.mark_to_market({active_symbol: float(market_frame.iloc[-1]["close"])}).model_dump(mode="json"),
             "alerts": [record.model_dump(mode="json") for record in alert_service.list_recent(limit=8)],
+            "jobs": [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()],
+            "runs": [run.model_dump(mode="json") for run in await paper_scheduler.list_runs(limit=8)],
             "backtest": {
                 "leakage_check": backtest_summary["leakage_check"],
                 "metrics": backtest_summary["backtest"]["metrics"],
@@ -278,17 +288,59 @@ def create_app() -> FastAPI:
         records = [record.model_dump(mode="json") for record in alert_service.list_recent(limit=limit)]
         return {"alerts": records}
 
+    @app.get("/paper/jobs")
+    async def paper_jobs() -> dict:
+        jobs = [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()]
+        return {"jobs": jobs}
+
+    @app.post("/paper/jobs")
+    async def create_paper_job(payload: PaperCycleJobCreate) -> dict:
+        job = await paper_scheduler.create_job(payload)
+        return {"job": job.model_dump(mode="json")}
+
+    @app.post("/paper/jobs/{job_id}/start")
+    async def start_paper_job(job_id: int) -> dict:
+        job = await paper_scheduler.start_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Paper cycle job {job_id} not found.")
+        return {"job": job.model_dump(mode="json")}
+
+    @app.post("/paper/jobs/{job_id}/pause")
+    async def pause_paper_job(job_id: int) -> dict:
+        job = await paper_scheduler.pause_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Paper cycle job {job_id} not found.")
+        return {"job": job.model_dump(mode="json")}
+
+    @app.post("/paper/jobs/{job_id}/run")
+    async def run_paper_job_once(job_id: int) -> dict:
+        try:
+            cycle = await paper_scheduler.run_job_once(job_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return cycle.model_dump(mode="json")
+
+    @app.get("/paper/runs")
+    async def paper_runs(limit: int = 20, job_id: int | None = None) -> dict:
+        runs = [run.model_dump(mode="json") for run in await paper_scheduler.list_runs(limit=limit, job_id=job_id)]
+        return {"runs": runs}
+
     @app.post("/paper/cycles/{symbol}")
     async def run_paper_cycle(
         symbol: str,
         timeframe: str | None = None,
         lookback_bars: int | None = None,
     ) -> dict:
-        cycle = await paper_trading_service.run_cycle(
-            symbol=symbol,
-            timeframe=timeframe or settings.paper_trading.default_cycle_timeframe,
-            lookback_bars=lookback_bars or settings.paper_trading.default_lookback_bars,
-        )
+        try:
+            cycle = await paper_scheduler.run_ad_hoc_cycle(
+                symbol=symbol,
+                timeframe=timeframe or settings.paper_trading.default_cycle_timeframe,
+                lookback_bars=lookback_bars or settings.paper_trading.default_lookback_bars,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return cycle.model_dump(mode="json")
 
     @app.post("/orders/paper")

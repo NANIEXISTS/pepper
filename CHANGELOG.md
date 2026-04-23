@@ -2,6 +2,22 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.3.0] - 2026-04-23
+
+### Added
+
+- Persistent paper-cycle jobs and run-history tables
+- Background paper-trading scheduler with startup restore for active jobs
+- API endpoints for creating, starting, pausing, running, and listing paper jobs
+- API endpoint for listing persisted paper-cycle runs
+- Dashboard views for scheduled jobs and recent runs
+- Scheduler and API tests covering job history and overlap protection
+
+### Changed
+
+- Manual paper cycles now persist run history through the same control-plane path as scheduled cycles
+- Paper-trading service rejects overlapping cycles for the same symbol
+
 ## [0.2.0] - 2026-04-23
 
 ### Added

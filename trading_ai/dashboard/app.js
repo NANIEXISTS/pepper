@@ -130,6 +130,58 @@ function renderAlerts(alerts) {
     .join("");
 }
 
+function renderJobs(jobs) {
+  const root = document.getElementById("jobs-list");
+  if (!jobs.length) {
+    root.innerHTML = '<p class="table-empty">No scheduled jobs yet.</p>';
+    return;
+  }
+  root.innerHTML = jobs
+    .map((job) => {
+      const stateClass = job.is_active ? "positive" : "negative";
+      const lastStatus = job.last_status ? ` - ${job.last_status}` : "";
+      return `
+        <article class="alert-item">
+          <header>
+            <strong>${job.symbol} - ${job.timeframe}</strong>
+            <time>every ${job.interval_seconds}s</time>
+          </header>
+          <p>
+            <span class="${stateClass}">${job.is_active ? "active" : "paused"}</span>${lastStatus}
+            - lookback ${job.lookback_bars} bars
+          </p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderRuns(runs) {
+  const root = document.getElementById("runs-list");
+  if (!runs.length) {
+    root.innerHTML = '<p class="table-empty">No runs yet.</p>';
+    return;
+  }
+  root.innerHTML = runs
+    .map((run) => {
+      const tone = run.status === "completed" ? "positive" : run.status === "failed" ? "negative" : "";
+      const jobLabel = run.job_id ? `job ${run.job_id}` : run.source;
+      const execution = run.execution_status ? ` - ${run.execution_status}` : "";
+      const error = run.error_message ? `<p class="negative">${run.error_message}</p>` : "";
+      return `
+        <article class="alert-item">
+          <header>
+            <strong>${run.symbol} - ${jobLabel}</strong>
+            <time>${new Date(run.started_at).toLocaleString()}</time>
+          </header>
+          <p><span class="${tone}">${run.status}</span>${execution}</p>
+          ${error}
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function renderCycle(lastCycle) {
   if (!lastCycle) {
     setText("signal-value", "Awaiting cycle");
@@ -178,16 +230,16 @@ function renderCycle(lastCycle) {
 
 function renderOverview(overview) {
   state.overview = overview;
-  const { config, market, features, portfolio, alerts, backtest, last_cycle: lastCycle } = overview;
+  const { config, market, features, portfolio, alerts, jobs, runs, backtest, last_cycle: lastCycle } = overview;
 
   setText("mode-pill", config.mode);
   setText("provider-pill", config.provider);
   setText("live-pill", config.live_trading_enabled ? "enabled" : "disabled");
-  setText("market-title", `${market.symbol} · ${market.timeframe}`);
+  setText("market-title", `${market.symbol} - ${market.timeframe}`);
   setText("latest-price", money(market.latest_price));
   setText("latest-timestamp", new Date(market.latest_timestamp).toLocaleString());
   setText("equity-value", money(portfolio.equity));
-  setText("equity-subtext", `${money(portfolio.cash)} cash · ${Object.keys(portfolio.positions || {}).length} open positions`);
+  setText("equity-subtext", `${money(portfolio.cash)} cash - ${Object.keys(portfolio.positions || {}).length} open positions`);
 
   const dailyClass = portfolio.daily_pnl_fraction >= 0 ? "positive" : "negative";
   setText("daily-pnl-value", percent(portfolio.daily_pnl_fraction), dailyClass);
@@ -214,7 +266,9 @@ function renderOverview(overview) {
   renderTags("backtest-warning-list", warningTags);
 
   renderPositions(portfolio.positions);
-  renderAlerts(alerts);
+  renderAlerts(alerts || []);
+  renderJobs(jobs || []);
+  renderRuns(runs || []);
   renderCycle(lastCycle);
 }
 

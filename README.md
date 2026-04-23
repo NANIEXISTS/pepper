@@ -12,6 +12,7 @@ The repository now contains the implementation layers for:
 - Phase 1: data, config, persistence, API, risk-gated execution
 - Phase 2: deterministic features, EMA baseline, walk-forward backtesting, leakage checks
 - Phase 3: portfolio state, alerts, paper-trading cycle orchestration
+- Phase 3.5: scheduled paper-trading control plane with persisted jobs and run history
 - Phase 4: analyst, debate, strategy, and trader agents
 - Phase 5: execution-timing RL primitives and policy hooks
 - Phase 6 foundation: guarded ccxt live-router with capability checks and sandbox support
@@ -34,6 +35,7 @@ Pepper is structured to avoid those failures by default.
 
 - Serves a FastAPI backend with market-data, feature, backtest, paper-order, portfolio, alert, and paper-cycle endpoints
 - Serves an operator console at `/dashboard` for portfolio, research, alerts, and agent-cycle monitoring
+- Schedules recurring paper cycles with persisted job state and run history
 - Normalizes market data asynchronously
 - Computes deterministic bar-close features
 - Runs leakage-aware backtests with walk-forward validation
@@ -144,6 +146,12 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 | `POST /paper/cycles/{symbol}` | full multi-agent paper-trading cycle |
 | `GET /portfolio` | current portfolio state |
 | `GET /alerts` | recent operator alerts |
+| `GET /paper/jobs` | list scheduled paper-cycle jobs |
+| `POST /paper/jobs` | create a scheduled paper-cycle job |
+| `POST /paper/jobs/{job_id}/start` | resume a scheduled paper-cycle job |
+| `POST /paper/jobs/{job_id}/pause` | pause a scheduled paper-cycle job |
+| `POST /paper/jobs/{job_id}/run` | run a scheduled job once on demand |
+| `GET /paper/runs` | list persisted paper-cycle run history |
 
 ## Current verification status
 
@@ -158,6 +166,7 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 - [x] Phase 1 foundation
 - [x] Phase 2 research and backtesting core
 - [x] Phase 3 paper-trading architecture
+- [x] Phase 3.5 paper-trading control plane
 - [x] Phase 4 multi-agent architecture
 - [x] Phase 5 RL execution-timing architecture
 - [ ] Phase 6 real-world verification gates

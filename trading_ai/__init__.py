@@ -5,7 +5,7 @@ from .execution import ExecutionEngine, LiveOrderRouter, PaperOrderRouter
 from .risk import RiskAuditAgent
 from .settings import TradingSettings, get_settings
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "ExecutionEngine",
