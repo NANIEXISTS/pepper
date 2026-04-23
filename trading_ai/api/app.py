@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+import pandas as pd
 
 from ..backtesting import BacktestEngine, EmaCrossoverStrategy, FeatureLeakageAnalyzer, LookAheadBiasError, WalkForwardValidator
 from ..alerts import AlertService
@@ -75,6 +79,136 @@ def create_app() -> FastAPI:
     app.state.alert_service = alert_service
     app.state.paper_trading_service = paper_trading_service
 
+    dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
+    app.mount("/assets", StaticFiles(directory=dashboard_dir), name="dashboard-assets")
+
+    def _backtest_lookback_bars() -> int:
+        return max(
+            settings.data.default_lookback_bars,
+            settings.backtesting.train_bars + (settings.backtesting.test_bars * settings.backtesting.max_walk_forward_windows),
+            settings.backtesting.trend_filter_window + 50,
+        )
+
+    async def _run_backtest_summary(symbol: str, timeframe: str, lookback_bars: int) -> dict:
+        request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
+        raw_frame = await market_data_service.fetch_dataframe(request)
+        try:
+            leakage_check = leakage_analyzer.assert_no_lookahead(raw_frame, feature_engineer)
+        except LookAheadBiasError as exc:
+            raise HTTPException(status_code=500, detail=f"Look-ahead bias detected in engineered features: {exc}") from exc
+
+        enriched = feature_engineer.enrich(raw_frame)
+        strategy = EmaCrossoverStrategy(
+            short_window=settings.backtesting.short_window,
+            long_window=settings.backtesting.long_window,
+            trend_filter_window=settings.backtesting.trend_filter_window,
+            long_only=True,
+        )
+        backtest_result = backtest_engine.run(
+            enriched,
+            strategy=strategy,
+            symbol=symbol,
+            timeframe=timeframe,
+        )
+        walk_forward_result = walk_forward_validator.run(
+            enriched,
+            strategy=strategy,
+            symbol=symbol,
+            timeframe=timeframe,
+        )
+        return {
+            "leakage_check": leakage_check.model_dump(mode="json"),
+            "backtest": backtest_result.model_dump(mode="json"),
+            "walk_forward": walk_forward_result.model_dump(mode="json"),
+        }
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> RedirectResponse:
+        return RedirectResponse(url="/dashboard")
+
+    @app.get("/dashboard", include_in_schema=False)
+    async def dashboard() -> FileResponse:
+        return FileResponse(dashboard_dir / "index.html")
+
+    @app.get("/dashboard/data")
+    async def dashboard_data(
+        symbol: str | None = None,
+        timeframe: str | None = None,
+        lookback_bars: int | None = None,
+    ) -> dict:
+        active_symbol = symbol or settings.default_symbol
+        active_timeframe = timeframe or settings.paper_trading.default_cycle_timeframe
+        request = MarketDataRequest(
+            symbol=active_symbol,
+            timeframe=active_timeframe,
+            lookback_bars=lookback_bars or max(settings.paper_trading.default_lookback_bars, settings.data.default_lookback_bars),
+        )
+        market_frame = await market_data_service.fetch_dataframe(request)
+        enriched = feature_engineer.enrich(market_frame)
+        recent_market = [
+            {
+                "timestamp": timestamp.isoformat(),
+                "close": float(row["close"]),
+                "volume": float(row["volume"]),
+            }
+            for timestamp, row in market_frame.tail(80).iterrows()
+        ]
+        indicator_columns = [
+            "close",
+            "ema_20",
+            "ema_50",
+            "ema_200",
+            "rsi_14",
+            "macd",
+            "macd_signal",
+            "atr_14",
+            "volume_zscore_20",
+        ]
+        latest_features: dict[str, float] = {}
+        for column in indicator_columns:
+            if column not in enriched.columns:
+                continue
+            value = enriched.iloc[-1][column]
+            if pd.notna(value):
+                latest_features[column] = float(value)
+        backtest_summary = await _run_backtest_summary(
+            symbol=active_symbol,
+            timeframe=active_timeframe,
+            lookback_bars=max(request.lookback_bars, _backtest_lookback_bars()),
+        )
+
+        return {
+            "config": {
+                "app_name": settings.app_name,
+                "mode": settings.app_mode.value,
+                "default_symbol": settings.default_symbol,
+                "provider": settings.data.provider,
+                "supported_timeframes": settings.data.supported_timeframes,
+                "live_trading_enabled": settings.execution.live_trading_enabled,
+            },
+            "market": {
+                "symbol": active_symbol,
+                "timeframe": active_timeframe,
+                "latest_timestamp": market_frame.index[-1].isoformat(),
+                "latest_price": float(market_frame.iloc[-1]["close"]),
+                "recent_bars": recent_market,
+            },
+            "features": latest_features,
+            "portfolio": portfolio_service.mark_to_market({active_symbol: float(market_frame.iloc[-1]["close"])}).model_dump(mode="json"),
+            "alerts": [record.model_dump(mode="json") for record in alert_service.list_recent(limit=8)],
+            "backtest": {
+                "leakage_check": backtest_summary["leakage_check"],
+                "metrics": backtest_summary["backtest"]["metrics"],
+                "equity_curve": backtest_summary["backtest"]["equity_curve"][-80:],
+                "walk_forward_summary": backtest_summary["walk_forward"]["summary"],
+            },
+            "last_cycle": (
+                paper_trading_service.last_cycle.model_dump(mode="json")
+                if paper_trading_service.last_cycle is not None
+                else None
+            ),
+        }
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "mode": settings.app_mode.value}
@@ -126,49 +260,13 @@ def create_app() -> FastAPI:
 
     @app.get("/backtests/ema/{symbol}")
     async def ema_backtest(symbol: str, timeframe: str = "1d", lookback_bars: int | None = None) -> dict:
-        minimum_lookback = max(
-            settings.data.default_lookback_bars,
-            settings.backtesting.train_bars + (settings.backtesting.test_bars * settings.backtesting.max_walk_forward_windows),
-            settings.backtesting.trend_filter_window + 50,
-        )
-        request = MarketDataRequest(
+        minimum_lookback = _backtest_lookback_bars()
+        result = await _run_backtest_summary(
             symbol=symbol,
             timeframe=timeframe,
             lookback_bars=lookback_bars or minimum_lookback,
         )
-        raw_frame = await market_data_service.fetch_dataframe(request)
-        try:
-            leakage_check = leakage_analyzer.assert_no_lookahead(raw_frame, feature_engineer)
-        except LookAheadBiasError as exc:
-            raise HTTPException(status_code=500, detail=f"Look-ahead bias detected in engineered features: {exc}") from exc
-
-        enriched = feature_engineer.enrich(raw_frame)
-        strategy = EmaCrossoverStrategy(
-            short_window=settings.backtesting.short_window,
-            long_window=settings.backtesting.long_window,
-            trend_filter_window=settings.backtesting.trend_filter_window,
-            long_only=True,
-        )
-        backtest_result = backtest_engine.run(
-            enriched,
-            strategy=strategy,
-            symbol=symbol,
-            timeframe=timeframe,
-        )
-        walk_forward_result = walk_forward_validator.run(
-            enriched,
-            strategy=strategy,
-            symbol=symbol,
-            timeframe=timeframe,
-        )
-
-        return {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "leakage_check": leakage_check.model_dump(mode="json"),
-            "backtest": backtest_result.model_dump(mode="json"),
-            "walk_forward": walk_forward_result.model_dump(mode="json"),
-        }
+        return {"symbol": symbol, "timeframe": timeframe, **result}
 
     @app.get("/portfolio")
     async def portfolio() -> dict:

@@ -33,6 +33,7 @@ Pepper is structured to avoid those failures by default.
 ## What it does today
 
 - Serves a FastAPI backend with market-data, feature, backtest, paper-order, portfolio, alert, and paper-cycle endpoints
+- Serves an operator console at `/dashboard` for portfolio, research, alerts, and agent-cycle monitoring
 - Normalizes market data asynchronously
 - Computes deterministic bar-close features
 - Runs leakage-aware backtests with walk-forward validation
@@ -117,6 +118,8 @@ python -m pytest -q
 python -m trading_ai.main
 ```
 
+Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the operator console.
+
 ### 4. Useful helper scripts
 
 ```powershell
@@ -131,6 +134,8 @@ python -m trading_ai.main
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | service health and mode |
+| `GET /dashboard` | operator console UI |
+| `GET /dashboard/data` | aggregated dashboard read model |
 | `GET /config` | effective runtime summary |
 | `GET /market-data/{symbol}` | normalized OHLCV preview |
 | `GET /features/{symbol}` | latest engineered features |
@@ -174,5 +179,6 @@ Phase 6 remains open until:
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Repo Guide](docs/REPO_GUIDE.md)

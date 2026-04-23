@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pepper Operator Console</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Pepper</p>
+          <h1>Operator Console</h1>
+          <p class="hero-copy">
+            Research, risk, and paper execution in one place. The console is read-only until
+            you explicitly run a paper cycle.
+          </p>
+        </div>
+        <div class="hero-metrics">
+          <div class="hero-pill">
+            <span>Mode</span>
+            <strong id="mode-pill">paper</strong>
+          </div>
+          <div class="hero-pill">
+            <span>Provider</span>
+            <strong id="provider-pill">yahoo</strong>
+          </div>
+          <div class="hero-pill">
+            <span>Live</span>
+            <strong id="live-pill">disabled</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="toolbar panel">
+        <div class="toolbar-controls">
+          <label>
+            Symbol
+            <input id="symbol-input" type="text" value="BTC-USD" spellcheck="false">
+          </label>
+          <label>
+            Timeframe
+            <select id="timeframe-select">
+              <option value="5m">5m</option>
+              <option value="15m">15m</option>
+              <option value="1h" selected>1h</option>
+              <option value="4h">4h</option>
+              <option value="1d">1d</option>
+            </select>
+          </label>
+        </div>
+        <div class="toolbar-actions">
+          <button id="refresh-button" class="button subtle" type="button">Refresh</button>
+          <button id="paper-cycle-button" class="button primary" type="button">Run Paper Cycle</button>
+        </div>
+      </section>
+
+      <section class="status-strip">
+        <div class="status-card panel">
+          <span class="status-label">Latest bar</span>
+          <strong id="latest-timestamp">-</strong>
+        </div>
+        <div class="status-card panel">
+          <span class="status-label">Last cycle</span>
+          <strong id="cycle-status">No cycle yet</strong>
+        </div>
+        <div class="status-card panel">
+          <span class="status-label">Refresh state</span>
+          <strong id="refresh-status">Idle</strong>
+        </div>
+      </section>
+
+      <section class="metrics-grid">
+        <article class="metric-card panel">
+          <span class="metric-label">Portfolio Equity</span>
+          <strong id="equity-value">-</strong>
+          <p id="equity-subtext" class="metric-subtext">Cash and mark-to-market value.</p>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Daily PnL</span>
+          <strong id="daily-pnl-value">-</strong>
+          <p class="metric-subtext">Compared with the current UTC daily anchor.</p>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Backtest Return</span>
+          <strong id="backtest-return-value">-</strong>
+          <p class="metric-subtext">EMA baseline only. Treat as research, not truth.</p>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Walk-Forward Sharpe</span>
+          <strong id="walk-forward-sharpe-value">-</strong>
+          <p class="metric-subtext">Average across held-out windows.</p>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Latest Signal</span>
+          <strong id="signal-value">Awaiting cycle</strong>
+          <p id="signal-subtext" class="metric-subtext">Run a paper cycle to populate agent output.</p>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Risk Gate</span>
+          <strong id="risk-gate-value">Standing by</strong>
+          <p id="risk-gate-subtext" class="metric-subtext">Orders route through the execution engine only.</p>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel chart-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Market Pulse</p>
+              <h2 id="market-title">BTC-USD</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Last price</span>
+              <strong id="latest-price">-</strong>
+            </div>
+          </div>
+          <div id="price-chart" class="chart"></div>
+          <div class="mini-metrics">
+            <div>
+              <span>EMA 20</span>
+              <strong id="ema20-value">-</strong>
+            </div>
+            <div>
+              <span>EMA 50</span>
+              <strong id="ema50-value">-</strong>
+            </div>
+            <div>
+              <span>EMA 200</span>
+              <strong id="ema200-value">-</strong>
+            </div>
+            <div>
+              <span>RSI 14</span>
+              <strong id="rsi-value">-</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Research Equity Curve</p>
+              <h2>EMA Backtest</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Max drawdown</span>
+              <strong id="max-drawdown-value">-</strong>
+            </div>
+          </div>
+          <div id="equity-chart" class="chart"></div>
+          <div id="backtest-warning-list" class="tag-row"></div>
+        </article>
+
+        <article class="panel agent-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Agent Decision</p>
+              <h2>Latest Cycle</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Confidence</span>
+              <strong id="cycle-confidence">-</strong>
+            </div>
+          </div>
+          <div class="narrative-block">
+            <h3>Analysis</h3>
+            <p id="analysis-summary">No cycle has run yet.</p>
+          </div>
+          <div class="narrative-block">
+            <h3>Rationale</h3>
+            <p id="strategy-rationale">The dashboard will stay passive until you trigger a paper cycle.</p>
+          </div>
+          <div class="tag-row" id="cycle-metadata"></div>
+        </article>
+
+        <article class="panel debate-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Debate Layer</p>
+              <h2>Bull vs Bear</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Consensus bias</span>
+              <strong id="consensus-bias-value">-</strong>
+            </div>
+          </div>
+          <div class="debate-columns">
+            <section class="debate-column bull">
+              <p class="debate-title">Bull case</p>
+              <strong id="bull-score">-</strong>
+              <p id="bull-argument">Waiting for the first cycle.</p>
+            </section>
+            <section class="debate-column bear">
+              <p class="debate-title">Bear case</p>
+              <strong id="bear-score">-</strong>
+              <p id="bear-argument">Waiting for the first cycle.</p>
+            </section>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Portfolio</p>
+              <h2>Open Positions</h2>
+            </div>
+          </div>
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Qty</th>
+                  <th>Avg</th>
+                  <th>Last</th>
+                  <th>Unrealized</th>
+                </tr>
+              </thead>
+              <tbody id="positions-body">
+                <tr>
+                  <td colspan="5" class="table-empty">No positions yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Alerts</p>
+              <h2>Recent Operator Signals</h2>
+            </div>
+          </div>
+          <div id="alerts-list" class="alert-list">
+            <p class="table-empty">No alerts yet.</p>
+          </div>
+        </article>
+      </section>
+    </div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from ..agents import AnalystAgent, BearAgent, BullAgent, DebateLayer, StrategyAgent, TraderAgent
 from ..agents.models import AgentContext
@@ -28,6 +29,7 @@ class PaperTradingService:
     trader_agent: TraderAgent
     debate_layer: DebateLayer
     paper_settings: PaperTradingSettings
+    last_cycle: Optional[PaperTradingCycleResult] = None
 
     async def run_cycle(self, symbol: str, timeframe: str, lookback_bars: int) -> PaperTradingCycleResult:
         request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
@@ -87,7 +89,7 @@ class PaperTradingService:
             execution_status=report.status.value if report is not None else "none",
         )
 
-        return PaperTradingCycleResult(
+        result = PaperTradingCycleResult(
             symbol=symbol,
             timeframe=timeframe,
             latest_price=latest_price,
@@ -102,6 +104,8 @@ class PaperTradingService:
                 "trade_rejected": report is not None and report.status == OrderStatus.REJECTED,
             },
         )
+        self.last_cycle = result
+        return result
 
 
 def build_default_paper_trading_service(
