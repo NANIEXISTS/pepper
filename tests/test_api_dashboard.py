@@ -90,5 +90,6 @@ def test_dashboard_data_route_returns_overview(monkeypatch, tmp_path: Path) -> N
     assert len(payload["market"]["recent_bars"]) == 80
     assert "jobs" in payload
     assert "runs" in payload
+    assert "trade_audit" in payload
     assert payload["backtest"]["leakage_check"]["passed"] is True
     assert "equity_curve" in payload["backtest"]

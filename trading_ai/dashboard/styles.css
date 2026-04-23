@@ -125,6 +125,7 @@ table th {
 }
 
 .toolbar,
+.operator-grid,
 .status-strip,
 .metrics-grid,
 .content-grid,
@@ -201,6 +202,11 @@ select {
   margin-bottom: 18px;
 }
 
+.operator-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
 .status-card {
   padding: 16px 20px;
 }
@@ -248,6 +254,28 @@ select {
 
 .panel-highlight {
   text-align: right;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.checkbox-row {
+  align-items: center;
+  grid-template-columns: auto 1fr;
+  align-self: end;
+}
+
+.checkbox-row input {
+  min-width: auto;
 }
 
 .chart {
@@ -409,6 +437,33 @@ th:last-child {
   margin: 10px 0 0;
 }
 
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.button.small {
+  padding: 9px 14px;
+  font-size: 0.9rem;
+}
+
+.audit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.audit-chip {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
 .positive {
   color: #7cf4c7;
 }
@@ -422,7 +477,8 @@ th:last-child {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .content-grid {
+  .content-grid,
+  .operator-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -430,6 +486,7 @@ th:last-child {
 @media (max-width: 900px) {
   .hero,
   .toolbar,
+  .operator-grid,
   .status-strip,
   .metrics-grid,
   .debate-columns,
@@ -444,5 +501,9 @@ th:last-child {
   .toolbar-actions,
   .toolbar-controls {
     flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
   }
 }

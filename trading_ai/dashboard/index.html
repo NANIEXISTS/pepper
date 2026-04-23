@@ -13,8 +13,8 @@
           <p class="eyebrow">Pepper</p>
           <h1>Operator Console</h1>
           <p class="hero-copy">
-            Research, risk, and paper execution in one place. The console is read-only until
-            you explicitly run a paper cycle.
+            Research, risk, scheduling, and paper execution in one place. Operator actions stay
+            in paper mode and still route through the backend risk gate.
           </p>
         </div>
         <div class="hero-metrics">
@@ -69,6 +69,91 @@
           <span class="status-label">Refresh state</span>
           <strong id="refresh-status">Idle</strong>
         </div>
+      </section>
+
+      <section class="operator-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Operator</p>
+              <h2>Schedule Paper Job</h2>
+            </div>
+          </div>
+          <form id="job-form" class="form-grid">
+            <label>
+              Symbol
+              <input id="job-symbol-input" type="text" value="BTC-USD" spellcheck="false">
+            </label>
+            <label>
+              Timeframe
+              <select id="job-timeframe-select">
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="1h" selected>1h</option>
+                <option value="4h">4h</option>
+                <option value="1d">1d</option>
+              </select>
+            </label>
+            <label>
+              Lookback Bars
+              <input id="job-lookback-input" type="number" value="600" min="50" max="5000">
+            </label>
+            <label>
+              Interval Seconds
+              <input id="job-interval-input" type="number" value="300" min="60" max="86400">
+            </label>
+            <label class="checkbox-row">
+              <input id="job-auto-start-input" type="checkbox" checked>
+              <span>Start immediately</span>
+            </label>
+            <button id="job-submit-button" class="button primary" type="submit">Create Job</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Operator</p>
+              <h2>Manual Paper Order</h2>
+            </div>
+          </div>
+          <form id="manual-order-form" class="form-grid">
+            <label>
+              Symbol
+              <input id="manual-symbol-input" type="text" value="BTC-USD" spellcheck="false">
+            </label>
+            <label>
+              Timeframe
+              <select id="manual-timeframe-select">
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="1h" selected>1h</option>
+                <option value="4h">4h</option>
+                <option value="1d">1d</option>
+              </select>
+            </label>
+            <label>
+              Side
+              <select id="manual-side-select">
+                <option value="buy">Buy</option>
+                <option value="sell">Sell</option>
+              </select>
+            </label>
+            <label>
+              Quantity
+              <input id="manual-quantity-input" type="number" value="0.01" min="0.0001" step="0.0001">
+            </label>
+            <label>
+              Stop Loss
+              <input id="manual-stop-loss-input" type="number" value="95000" min="0.01" step="0.01">
+            </label>
+            <label>
+              Take Profit
+              <input id="manual-take-profit-input" type="number" value="" min="0.01" step="0.01" placeholder="Optional">
+            </label>
+            <button id="manual-order-button" class="button primary" type="submit">Submit Manual Order</button>
+          </form>
+        </article>
       </section>
 
       <section class="metrics-grid">
@@ -259,6 +344,18 @@
           </div>
           <div id="runs-list" class="alert-list">
             <p class="table-empty">No runs yet.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Execution</p>
+              <h2>Trade Audit</h2>
+            </div>
+          </div>
+          <div id="trade-audit-list" class="alert-list">
+            <p class="table-empty">No trade decisions yet.</p>
           </div>
         </article>
       </section>

@@ -8,7 +8,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from ..core.models import ExecutionReport, OrderIntent, RiskDecision, TradeDecisionLog
-from .models import Base, PaperCycleJobRecord, PaperCycleRunRecord, TradeAuditEvent
+from .models import Base, PaperCycleJobRecord, PaperCycleRunRecord, PortfolioStateRecord, TradeAuditEvent
+from .schemas import PortfolioStateView, TradeAuditEventView
 
 if TYPE_CHECKING:
     from ..orchestration.models import PaperCycleJobCreate, PaperCycleJobView, PaperCycleRunView
@@ -57,6 +58,44 @@ class TradeAuditStore:
             )
             session.add(event)
             await session.commit()
+
+    async def list_trade_events(self, *, limit: int = 50) -> list[TradeAuditEventView]:
+        async with self.session_factory() as session:
+            query = select(TradeAuditEvent).order_by(desc(TradeAuditEvent.id)).limit(limit)
+            result = await session.execute(query)
+            events = result.scalars().all()
+            return [self._to_trade_event_view(event) for event in events]
+
+    async def save_portfolio_state(self, state: PortfolioStateView) -> PortfolioStateView:
+        async with self.session_factory() as session:
+            record = await session.get(PortfolioStateRecord, state.key)
+            if record is None:
+                record = PortfolioStateRecord(
+                    key=state.key,
+                    cash=state.cash,
+                    realized_pnl=state.realized_pnl,
+                    daily_anchor_equity=state.daily_anchor_equity,
+                    daily_anchor_date=state.daily_anchor_date,
+                    positions_payload=state.positions_payload,
+                )
+                session.add(record)
+            else:
+                record.cash = state.cash
+                record.realized_pnl = state.realized_pnl
+                record.daily_anchor_equity = state.daily_anchor_equity
+                record.daily_anchor_date = state.daily_anchor_date
+                record.positions_payload = state.positions_payload
+                record.updated_at = datetime.now(UTC)
+            await session.commit()
+            await session.refresh(record)
+            return self._to_portfolio_state_view(record)
+
+    async def load_portfolio_state(self, *, key: str = "paper-default") -> PortfolioStateView | None:
+        async with self.session_factory() as session:
+            record = await session.get(PortfolioStateRecord, key)
+            if record is None:
+                return None
+            return self._to_portfolio_state_view(record)
 
     async def create_paper_cycle_job(self, payload: PaperCycleJobCreate) -> PaperCycleJobView:
         async with self.session_factory() as session:
@@ -211,4 +250,35 @@ class TradeAuditStore:
             trade_executed=run.trade_executed,
             error_message=run.error_message,
             cycle_payload=run.cycle_payload,
+        )
+
+    def _to_trade_event_view(self, event: TradeAuditEvent) -> TradeAuditEventView:
+        return TradeAuditEventView(
+            id=event.id,
+            created_at=event.created_at,
+            agent_name=event.agent_name,
+            symbol=event.symbol,
+            signal=event.signal,
+            confidence=event.confidence,
+            risk_check_passed=event.risk_check_passed,
+            action_taken=event.action_taken,
+            rationale=event.rationale,
+            order_payload=event.order_payload,
+            risk_reason=event.risk_reason,
+            risk_fraction=event.risk_fraction,
+            router=event.router,
+            order_status=event.order_status,
+            report_payload=event.report_payload,
+            metadata_payload=event.metadata_payload,
+        )
+
+    def _to_portfolio_state_view(self, record: PortfolioStateRecord) -> PortfolioStateView:
+        return PortfolioStateView(
+            key=record.key,
+            updated_at=record.updated_at,
+            cash=record.cash,
+            realized_pnl=record.realized_pnl,
+            daily_anchor_equity=record.daily_anchor_equity,
+            daily_anchor_date=record.daily_anchor_date,
+            positions_payload=record.positions_payload,
         )

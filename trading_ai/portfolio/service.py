@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 
 from ..core.models import ExecutionReport, OrderIntent, PortfolioSnapshot
 from ..logging_config import get_logger
+from ..persistence import PortfolioStateView
 from .models import PortfolioView, Position
 
 logger = get_logger(__name__)
@@ -113,3 +114,27 @@ class PortfolioService:
                 position.last_price = prices[symbol]
         self.daily_anchor_equity = self.cash + sum(position.market_value for position in self.positions.values())
         self.daily_anchor_date = now.date()
+
+    def export_state(self, *, key: str = "paper-default") -> PortfolioStateView:
+        return PortfolioStateView(
+            key=key,
+            cash=self.cash,
+            realized_pnl=self.realized_pnl,
+            daily_anchor_equity=self.daily_anchor_equity,
+            daily_anchor_date=self.daily_anchor_date,
+            positions_payload={
+                symbol: position.model_dump(mode="json")
+                for symbol, position in self.positions.items()
+                if abs(position.quantity) > 1e-12
+            },
+        )
+
+    def restore_state(self, state: PortfolioStateView) -> None:
+        self.cash = state.cash
+        self.realized_pnl = state.realized_pnl
+        self.daily_anchor_equity = state.daily_anchor_equity
+        self.daily_anchor_date = state.daily_anchor_date
+        self.positions = {
+            symbol: Position.model_validate(payload)
+            for symbol, payload in state.positions_payload.items()
+        }

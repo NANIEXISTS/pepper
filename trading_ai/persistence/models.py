@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -80,3 +80,20 @@ class PaperCycleRunRecord(Base):
     trade_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     cycle_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class PortfolioStateRecord(Base):
+    __tablename__ = "portfolio_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True, default="paper-default")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    cash: Mapped[float] = mapped_column(Float, nullable=False)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_anchor_equity: Mapped[float] = mapped_column(Float, nullable=False)
+    daily_anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
+    positions_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

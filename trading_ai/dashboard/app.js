@@ -11,13 +11,28 @@ const elements = {
   paperCycleButton: document.getElementById("paper-cycle-button"),
   refreshStatus: document.getElementById("refresh-status"),
   cycleStatus: document.getElementById("cycle-status"),
+  jobForm: document.getElementById("job-form"),
+  jobSymbolInput: document.getElementById("job-symbol-input"),
+  jobTimeframeSelect: document.getElementById("job-timeframe-select"),
+  jobLookbackInput: document.getElementById("job-lookback-input"),
+  jobIntervalInput: document.getElementById("job-interval-input"),
+  jobAutoStartInput: document.getElementById("job-auto-start-input"),
+  jobSubmitButton: document.getElementById("job-submit-button"),
+  manualOrderForm: document.getElementById("manual-order-form"),
+  manualSymbolInput: document.getElementById("manual-symbol-input"),
+  manualTimeframeSelect: document.getElementById("manual-timeframe-select"),
+  manualSideSelect: document.getElementById("manual-side-select"),
+  manualQuantityInput: document.getElementById("manual-quantity-input"),
+  manualStopLossInput: document.getElementById("manual-stop-loss-input"),
+  manualTakeProfitInput: document.getElementById("manual-take-profit-input"),
+  manualOrderButton: document.getElementById("manual-order-button"),
 };
 
 function money(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: value >= 100 ? 0 : 2,
+    maximumFractionDigits: Math.abs(Number(value ?? 0)) >= 100 ? 0 : 2,
   }).format(value ?? 0);
 }
 
@@ -33,6 +48,17 @@ function setText(id, value, className = "") {
   const node = document.getElementById(id);
   node.textContent = value;
   node.className = className;
+}
+
+async function apiRequest(url, options = {}) {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const detail = typeof payload === "object" && payload?.detail ? payload.detail : payload;
+    throw new Error(String(detail));
+  }
+  return payload;
 }
 
 function chartSvg(points, color) {
@@ -139,7 +165,10 @@ function renderJobs(jobs) {
   root.innerHTML = jobs
     .map((job) => {
       const stateClass = job.is_active ? "positive" : "negative";
-      const lastStatus = job.last_status ? ` - ${job.last_status}` : "";
+      const actionLabel = job.is_active ? "Pause" : "Start";
+      const actionPath = job.is_active ? "pause" : "start";
+      const lastStatus = job.last_status ? `<span class="audit-chip">${job.last_status}</span>` : "";
+      const lastError = job.last_error ? `<p class="negative">${job.last_error}</p>` : "";
       return `
         <article class="alert-item">
           <header>
@@ -147,13 +176,46 @@ function renderJobs(jobs) {
             <time>every ${job.interval_seconds}s</time>
           </header>
           <p>
-            <span class="${stateClass}">${job.is_active ? "active" : "paused"}</span>${lastStatus}
+            <span class="${stateClass}">${job.is_active ? "active" : "paused"}</span>
             - lookback ${job.lookback_bars} bars
           </p>
+          <div class="audit-meta">
+            ${lastStatus}
+          </div>
+          ${lastError}
+          <div class="job-actions">
+            <button class="button subtle small" type="button" data-job-action="${actionPath}" data-job-id="${job.id}">
+              ${actionLabel}
+            </button>
+            <button class="button subtle small" type="button" data-job-action="run" data-job-id="${job.id}">
+              Run Now
+            </button>
+          </div>
         </article>
       `;
     })
     .join("");
+
+  root.querySelectorAll("[data-job-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      const action = button.dataset.jobAction;
+      const jobId = button.dataset.jobId;
+      try {
+        const path =
+          action === "run"
+            ? `/paper/jobs/${jobId}/run`
+            : `/paper/jobs/${jobId}/${action}`;
+        await apiRequest(path, { method: "POST" });
+        elements.cycleStatus.textContent = action === "run" ? `Job ${jobId} executed.` : `Job ${jobId} updated.`;
+        await refresh();
+      } catch (error) {
+        elements.cycleStatus.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 function renderRuns(runs) {
@@ -176,6 +238,35 @@ function renderRuns(runs) {
           </header>
           <p><span class="${tone}">${run.status}</span>${execution}</p>
           ${error}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderTradeAudit(events) {
+  const root = document.getElementById("trade-audit-list");
+  if (!events.length) {
+    root.innerHTML = '<p class="table-empty">No trade decisions yet.</p>';
+    return;
+  }
+  root.innerHTML = events
+    .map((event) => {
+      const tone = event.risk_check_passed ? "positive" : "negative";
+      return `
+        <article class="alert-item">
+          <header>
+            <strong>${event.symbol} - ${event.signal}</strong>
+            <time>${new Date(event.created_at).toLocaleString()}</time>
+          </header>
+          <p>${event.rationale}</p>
+          <div class="audit-meta">
+            <span class="audit-chip ${tone}">${event.action_taken}</span>
+            <span class="audit-chip">${event.order_status}</span>
+            <span class="audit-chip">${event.router}</span>
+            <span class="audit-chip">confidence ${percent(event.confidence)}</span>
+            <span class="audit-chip">${event.risk_reason}</span>
+          </div>
         </article>
       `;
     })
@@ -216,10 +307,7 @@ function renderCycle(lastCycle) {
   setText("bear-argument", debate.bear.argument);
   setText("cycle-status", report ? `${report.status} via ${report.router}` : "No order emitted");
   setText("risk-gate-value", report ? report.status : "No order");
-  setText(
-    "risk-gate-subtext",
-    report ? report.message : "Trader output stayed below the execution threshold.",
-  );
+  setText("risk-gate-subtext", report ? report.message : "Trader output stayed below the execution threshold.");
 
   const metadataTags = Object.entries(lastCycle.metadata || {}).map(([key, value]) => ({
     label: `${key.replaceAll("_", " ")}: ${String(value)}`,
@@ -230,7 +318,18 @@ function renderCycle(lastCycle) {
 
 function renderOverview(overview) {
   state.overview = overview;
-  const { config, market, features, portfolio, alerts, jobs, runs, backtest, last_cycle: lastCycle } = overview;
+  const {
+    config,
+    market,
+    features,
+    portfolio,
+    alerts,
+    jobs,
+    runs,
+    trade_audit: tradeAudit,
+    backtest,
+    last_cycle: lastCycle,
+  } = overview;
 
   setText("mode-pill", config.mode);
   setText("provider-pill", config.provider);
@@ -238,12 +337,24 @@ function renderOverview(overview) {
   setText("market-title", `${market.symbol} - ${market.timeframe}`);
   setText("latest-price", money(market.latest_price));
   setText("latest-timestamp", new Date(market.latest_timestamp).toLocaleString());
-  setText("equity-value", money(portfolio.equity));
-  setText("equity-subtext", `${money(portfolio.cash)} cash - ${Object.keys(portfolio.positions || {}).length} open positions`);
+
+  const staleSuffix = portfolio.stale_symbols?.length ? ` - stale ${portfolio.stale_symbols.join(", ")}` : "";
+  setText(
+    "equity-value",
+    money(portfolio.equity),
+  );
+  setText(
+    "equity-subtext",
+    `${money(portfolio.cash)} cash - ${Object.keys(portfolio.positions || {}).length} open positions${staleSuffix}`,
+  );
 
   const dailyClass = portfolio.daily_pnl_fraction >= 0 ? "positive" : "negative";
   setText("daily-pnl-value", percent(portfolio.daily_pnl_fraction), dailyClass);
-  setText("backtest-return-value", percent(backtest.metrics.total_return_fraction), backtest.metrics.total_return_fraction >= 0 ? "positive" : "negative");
+  setText(
+    "backtest-return-value",
+    percent(backtest.metrics.total_return_fraction),
+    backtest.metrics.total_return_fraction >= 0 ? "positive" : "negative",
+  );
   setText("walk-forward-sharpe-value", number(backtest.walk_forward_summary.average_sharpe_ratio, 2));
   setText("max-drawdown-value", percent(backtest.metrics.max_drawdown_fraction), "negative");
   setText("ema20-value", money(features.ema_20));
@@ -269,6 +380,7 @@ function renderOverview(overview) {
   renderAlerts(alerts || []);
   renderJobs(jobs || []);
   renderRuns(runs || []);
+  renderTradeAudit(tradeAudit || []);
   renderCycle(lastCycle);
 }
 
@@ -278,11 +390,7 @@ async function fetchOverview() {
     timeframe: state.timeframe,
   });
   elements.refreshStatus.textContent = "Refreshing";
-  const response = await fetch(`/dashboard/data?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Dashboard request failed: ${response.status}`);
-  }
-  const overview = await response.json();
+  const overview = await apiRequest(`/dashboard/data?${params.toString()}`);
   state.symbol = overview.market.symbol;
   state.timeframe = overview.market.timeframe;
   elements.symbolInput.value = state.symbol;
@@ -299,17 +407,63 @@ async function runPaperCycle() {
       timeframe: state.timeframe,
       lookback_bars: "600",
     });
-    const response = await fetch(`/paper/cycles/${encodeURIComponent(state.symbol)}?${params.toString()}`, {
+    const result = await apiRequest(`/paper/cycles/${encodeURIComponent(state.symbol)}?${params.toString()}`, {
       method: "POST",
     });
-    if (!response.ok) {
-      throw new Error(`Paper cycle failed: ${response.status}`);
-    }
-    const result = await response.json();
     renderCycle(result);
     await fetchOverview();
   } finally {
     elements.paperCycleButton.disabled = false;
+  }
+}
+
+async function createJob(event) {
+  event.preventDefault();
+  elements.jobSubmitButton.disabled = true;
+  try {
+    await apiRequest("/paper/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: elements.jobSymbolInput.value.trim().toUpperCase(),
+        timeframe: elements.jobTimeframeSelect.value,
+        lookback_bars: Number(elements.jobLookbackInput.value),
+        interval_seconds: Number(elements.jobIntervalInput.value),
+        auto_start: elements.jobAutoStartInput.checked,
+      }),
+    });
+    elements.cycleStatus.textContent = "Paper job created.";
+    await fetchOverview();
+  } catch (error) {
+    elements.cycleStatus.textContent = error.message;
+  } finally {
+    elements.jobSubmitButton.disabled = false;
+  }
+}
+
+async function submitManualOrder(event) {
+  event.preventDefault();
+  elements.manualOrderButton.disabled = true;
+  try {
+    const takeProfit = elements.manualTakeProfitInput.value.trim();
+    const result = await apiRequest("/paper/orders/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: elements.manualSymbolInput.value.trim().toUpperCase(),
+        timeframe: elements.manualTimeframeSelect.value,
+        side: elements.manualSideSelect.value,
+        quantity: Number(elements.manualQuantityInput.value),
+        stop_loss_price: Number(elements.manualStopLossInput.value),
+        take_profit_price: takeProfit ? Number(takeProfit) : null,
+      }),
+    });
+    elements.cycleStatus.textContent = `${result.report.status} manual order for ${result.order.symbol}.`;
+    await fetchOverview();
+  } catch (error) {
+    elements.cycleStatus.textContent = error.message;
+  } finally {
+    elements.manualOrderButton.disabled = false;
   }
 }
 
@@ -332,5 +486,12 @@ elements.paperCycleButton.addEventListener("click", async () => {
     elements.cycleStatus.textContent = error.message;
   }
 });
+elements.jobForm.addEventListener("submit", createJob);
+elements.manualOrderForm.addEventListener("submit", submitManualOrder);
 
-window.addEventListener("load", refresh);
+window.addEventListener("load", () => {
+  elements.jobSymbolInput.value = state.symbol;
+  elements.manualSymbolInput.value = state.symbol;
+  refresh();
+  window.setInterval(refresh, 15000);
+});

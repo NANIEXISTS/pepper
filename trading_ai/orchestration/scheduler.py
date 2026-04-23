@@ -122,6 +122,7 @@ class PaperTradingScheduler:
             execution_status=execution_status,
             trade_executed=bool(cycle.metadata.get("trade_executed", False)),
         )
+        await self.audit_store.save_portfolio_state(self.paper_trading_service.portfolio_service.export_state())
         return cycle
 
     def _ensure_task(self, job_id: int) -> None:

@@ -43,7 +43,8 @@ class PaperTradingService:
             frame = await self.market_data.fetch_dataframe(request)
             enriched = self.feature_engineer.enrich(frame)
             latest_price = float(enriched.iloc[-1]["close"])
-            portfolio_view = self.portfolio_service.mark_to_market({symbol: latest_price})
+            price_map = await self._price_map_for_cycle(symbol=symbol, timeframe=timeframe, latest_price=latest_price)
+            portfolio_view = self.portfolio_service.mark_to_market(price_map)
 
             context = AgentContext(
                 symbol=symbol,
@@ -68,7 +69,7 @@ class PaperTradingService:
                     confidence=strategy.confidence,
                     rationale=strategy.rationale,
                     order=order,
-                    portfolio=self.portfolio_service.snapshot({symbol: latest_price}),
+                    portfolio=self.portfolio_service.snapshot(price_map),
                     metadata={
                         **strategy.metadata,
                         **order.metadata,
@@ -78,7 +79,7 @@ class PaperTradingService:
                 if report.status == OrderStatus.FILLED:
                     self.portfolio_service.apply_fill(order, report)
 
-            updated_portfolio = self.portfolio_service.mark_to_market({symbol: latest_price})
+            updated_portfolio = self.portfolio_service.mark_to_market(price_map)
             alert_level = "info"
             alert_message = "No trade executed."
             if report is not None and report.status == OrderStatus.FILLED:
@@ -113,6 +114,27 @@ class PaperTradingService:
             )
             self.last_cycle = result
             return result
+
+    async def _price_map_for_cycle(self, *, symbol: str, timeframe: str, latest_price: float) -> dict[str, float]:
+        tracked_symbols = {symbol, *self.portfolio_service.positions.keys()}
+        price_map: dict[str, float] = {symbol: latest_price}
+        fetch_tasks: list[tuple[str, asyncio.Task]] = []
+
+        for tracked_symbol in tracked_symbols:
+            if tracked_symbol == symbol:
+                continue
+            request = MarketDataRequest(
+                symbol=tracked_symbol,
+                timeframe=timeframe,
+                lookback_bars=50,
+            )
+            fetch_tasks.append((tracked_symbol, asyncio.create_task(self.market_data.fetch_dataframe(request))))
+
+        for tracked_symbol, task in fetch_tasks:
+            frame = await task
+            price_map[tracked_symbol] = float(frame.iloc[-1]["close"])
+
+        return price_map
 
 
 def build_default_paper_trading_service(

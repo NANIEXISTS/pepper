@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from ..execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
 from ..features import FeatureEngineer
 from ..llm import LLMClient
 from ..logging_config import configure_logging
-from ..orchestration import PaperCycleJobCreate, PaperTradingScheduler, build_default_paper_trading_service
+from ..orchestration import ManualPaperOrderRequest, PaperCycleJobCreate, PaperTradingScheduler, build_default_paper_trading_service
 from ..persistence import TradeAuditStore
 from ..portfolio import PortfolioService
 from ..reinforcement import ExecutionTimingCoordinator
@@ -69,6 +70,9 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await audit_store.create_schema()
+        saved_portfolio = await audit_store.load_portfolio_state()
+        if saved_portfolio is not None:
+            portfolio_service.restore_state(saved_portfolio)
         await paper_scheduler.initialize()
         try:
             yield
@@ -96,6 +100,26 @@ def create_app() -> FastAPI:
             settings.backtesting.train_bars + (settings.backtesting.test_bars * settings.backtesting.max_walk_forward_windows),
             settings.backtesting.trend_filter_window + 50,
         )
+
+    async def _price_map_for_portfolio(*, symbol: str, timeframe: str, latest_price: float) -> dict[str, float]:
+        tracked_symbols = {symbol, *portfolio_service.positions.keys()}
+        price_map: dict[str, float] = {symbol: latest_price}
+        tasks: list[tuple[str, asyncio.Task]] = []
+        for tracked_symbol in tracked_symbols:
+            if tracked_symbol == symbol:
+                continue
+            request = MarketDataRequest(
+                symbol=tracked_symbol,
+                timeframe=timeframe,
+                lookback_bars=50,
+            )
+            tasks.append((tracked_symbol, asyncio.create_task(market_data_service.fetch_dataframe(request))))
+
+        for tracked_symbol, task in tasks:
+            frame = await task
+            price_map[tracked_symbol] = float(frame.iloc[-1]["close"])
+
+        return price_map
 
     async def _run_backtest_summary(symbol: str, timeframe: str, lookback_bars: int) -> dict:
         request = MarketDataRequest(symbol=symbol, timeframe=timeframe, lookback_bars=lookback_bars)
@@ -179,6 +203,11 @@ def create_app() -> FastAPI:
             value = enriched.iloc[-1][column]
             if pd.notna(value):
                 latest_features[column] = float(value)
+        price_map = await _price_map_for_portfolio(
+            symbol=active_symbol,
+            timeframe=active_timeframe,
+            latest_price=float(market_frame.iloc[-1]["close"]),
+        )
         backtest_summary = await _run_backtest_summary(
             symbol=active_symbol,
             timeframe=active_timeframe,
@@ -202,10 +231,11 @@ def create_app() -> FastAPI:
                 "recent_bars": recent_market,
             },
             "features": latest_features,
-            "portfolio": portfolio_service.mark_to_market({active_symbol: float(market_frame.iloc[-1]["close"])}).model_dump(mode="json"),
+            "portfolio": portfolio_service.mark_to_market(price_map).model_dump(mode="json"),
             "alerts": [record.model_dump(mode="json") for record in alert_service.list_recent(limit=8)],
             "jobs": [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()],
             "runs": [run.model_dump(mode="json") for run in await paper_scheduler.list_runs(limit=8)],
+            "trade_audit": [event.model_dump(mode="json") for event in await audit_store.list_trade_events(limit=8)],
             "backtest": {
                 "leakage_check": backtest_summary["leakage_check"],
                 "metrics": backtest_summary["backtest"]["metrics"],
@@ -288,6 +318,11 @@ def create_app() -> FastAPI:
         records = [record.model_dump(mode="json") for record in alert_service.list_recent(limit=limit)]
         return {"alerts": records}
 
+    @app.get("/audit/trades")
+    async def trade_audit(limit: int = 20) -> dict:
+        events = [event.model_dump(mode="json") for event in await audit_store.list_trade_events(limit=limit)]
+        return {"events": events}
+
     @app.get("/paper/jobs")
     async def paper_jobs() -> dict:
         jobs = [job.model_dump(mode="json") for job in await paper_scheduler.list_jobs()]
@@ -342,6 +377,58 @@ def create_app() -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return cycle.model_dump(mode="json")
+
+    @app.post("/paper/orders/manual")
+    async def manual_paper_order(payload: ManualPaperOrderRequest) -> dict:
+        if settings.app_mode != TradingMode.PAPER:
+            raise HTTPException(status_code=409, detail="Manual paper orders are disabled in live mode.")
+
+        request = MarketDataRequest(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            lookback_bars=payload.lookback_bars,
+        )
+        frame = await market_data_service.fetch_dataframe(request)
+        latest_price = float(frame.iloc[-1]["close"])
+        price_map = await _price_map_for_portfolio(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            latest_price=latest_price,
+        )
+
+        if payload.side.value == "sell":
+            position = portfolio_service.positions.get(payload.symbol)
+            if position is None or position.quantity + 1e-12 < payload.quantity:
+                raise HTTPException(status_code=409, detail=f"Not enough {payload.symbol} position to sell.")
+
+        order = OrderIntent(
+            symbol=payload.symbol,
+            side=payload.side,
+            quantity=payload.quantity,
+            entry_price=latest_price,
+            stop_loss_price=payload.stop_loss_price,
+            take_profit_price=payload.take_profit_price,
+            order_type=payload.order_type,
+            metadata={"source": "operator-dashboard"},
+        )
+        signal = TradeSignal.BUY if payload.side.value == "buy" else TradeSignal.SELL
+        report = await execution_engine.place_order(
+            agent_name="operator-dashboard",
+            signal=signal,
+            confidence=1.0,
+            rationale=payload.rationale,
+            order=order,
+            portfolio=portfolio_service.snapshot(price_map),
+            metadata={"source": "operator-dashboard", "timeframe": payload.timeframe},
+        )
+        if report.status.value == "filled":
+            portfolio_service.apply_fill(order, report)
+            await audit_store.save_portfolio_state(portfolio_service.export_state())
+        return {
+            "order": order.model_dump(mode="json"),
+            "report": report.model_dump(mode="json"),
+            "portfolio": portfolio_service.mark_to_market(price_map).model_dump(mode="json"),
+        }
 
     @app.post("/orders/paper")
     async def paper_order(payload: dict) -> dict:

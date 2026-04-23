@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PositiveFloat, field_validator
 
 from ..agents.models import AnalystOutput, DebateOutput, StrategyOutput
 from ..alerts import AlertRecord
+from ..core.enums import OrderSide, OrderType
 from ..core.models import ExecutionReport
 from ..portfolio.models import PortfolioView
 
@@ -66,3 +67,20 @@ class PaperCycleRunView(BaseModel):
     trade_executed: bool = False
     error_message: str | None = None
     cycle_payload: dict[str, Any] | None = None
+
+
+class ManualPaperOrderRequest(BaseModel):
+    symbol: str = Field(min_length=1)
+    timeframe: str = Field(default="1h", min_length=2)
+    lookback_bars: int = Field(default=120, ge=50, le=5000)
+    side: OrderSide
+    quantity: PositiveFloat
+    stop_loss_price: PositiveFloat
+    take_profit_price: PositiveFloat | None = None
+    order_type: OrderType = OrderType.LIMIT
+    rationale: str = "Manual operator paper order."
+
+    @field_validator("timeframe")
+    @classmethod
+    def normalize_manual_timeframe(cls, value: str) -> str:
+        return value.lower()

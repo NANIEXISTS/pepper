@@ -2,6 +2,22 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.4.0] - 2026-04-23
+
+### Added
+
+- Durable paper portfolio restore across restarts
+- Manual paper-order endpoint for the operator console
+- Trade-audit listing endpoint and dashboard trade-history view
+- Writable dashboard controls for creating, starting, pausing, and running paper jobs
+- Dashboard forms for manual paper orders and scheduled job creation
+- Multi-symbol price refresh before paper risk checks so held positions do not go stale during normal operation
+
+### Changed
+
+- Dashboard overview now includes trade-audit history
+- Paper-trading scheduler persists portfolio state after completed runs
+
 ## [0.3.1] - 2026-04-23
 
 ### Fixed

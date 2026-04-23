@@ -13,6 +13,7 @@ The repository now contains the implementation layers for:
 - Phase 2: deterministic features, EMA baseline, walk-forward backtesting, leakage checks
 - Phase 3: portfolio state, alerts, paper-trading cycle orchestration
 - Phase 3.5: scheduled paper-trading control plane with persisted jobs and run history
+- Phase 3.75: writable operator console with manual paper orders, trade audit, and restart-safe portfolio state
 - Phase 4: analyst, debate, strategy, and trader agents
 - Phase 5: execution-timing RL primitives and policy hooks
 - Phase 6 foundation: guarded ccxt live-router with capability checks and sandbox support
@@ -35,6 +36,7 @@ Pepper is structured to avoid those failures by default.
 
 - Serves a FastAPI backend with market-data, feature, backtest, paper-order, portfolio, alert, and paper-cycle endpoints
 - Serves an operator console at `/dashboard` for portfolio, research, alerts, and agent-cycle monitoring
+- Supports writable paper-mode operator actions: create jobs, start/pause jobs, run jobs on demand, and submit manual paper orders
 - Schedules recurring paper cycles with persisted job state and run history
 - Normalizes market data asynchronously
 - Computes deterministic bar-close features
@@ -152,6 +154,8 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 | `POST /paper/jobs/{job_id}/pause` | pause a scheduled paper-cycle job |
 | `POST /paper/jobs/{job_id}/run` | run a scheduled job once on demand |
 | `GET /paper/runs` | list persisted paper-cycle run history |
+| `POST /paper/orders/manual` | submit a manual paper order using live market context |
+| `GET /audit/trades` | list recent trade decisions, fills, and vetoes |
 
 ## Current verification status
 
@@ -167,6 +171,7 @@ Open [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard) for the 
 - [x] Phase 2 research and backtesting core
 - [x] Phase 3 paper-trading architecture
 - [x] Phase 3.5 paper-trading control plane
+- [x] Phase 3.75 writable operator console
 - [x] Phase 4 multi-agent architecture
 - [x] Phase 5 RL execution-timing architecture
 - [ ] Phase 6 real-world verification gates
