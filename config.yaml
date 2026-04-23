@@ -1,0 +1,75 @@
+app_name: Trading AI
+app_mode: paper
+default_symbol: BTC-USD
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+exchange:
+  exchange_id: binance
+  sandbox: true
+  api_key: null
+  api_secret: null
+  api_password: null
+
+data:
+  provider: yahoo
+  base_url: https://query1.finance.yahoo.com
+  request_timeout_seconds: 10.0
+  supported_timeframes:
+    - 5m
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+  default_lookback_bars: 500
+
+risk:
+  max_per_trade_risk_fraction: 0.01
+  max_daily_drawdown_fraction: 0.05
+  max_positions: 10
+  stop_loss_required: true
+
+execution:
+  default_order_type: limit
+  market_fallback_seconds: 3
+  live_trading_enabled: false
+
+paper_trading:
+  starting_cash: 100000.0
+  default_cycle_timeframe: 1h
+  default_lookback_bars: 600
+  signal_confidence_threshold: 0.55
+  schedule_interval_seconds: 300
+
+llm:
+  provider: disabled
+  model: openai/gpt-5-mini
+  api_key: null
+  api_base: null
+  temperature: 0.1
+
+reinforcement:
+  enabled: false
+  inventory_fraction_limit: 0.25
+  episode_length: 24
+  max_slippage_bps: 15.0
+
+backtesting:
+  initial_capital: 100000.0
+  transaction_fee_bps: 10.0
+  slippage_bps: 2.0
+  short_window: 20
+  long_window: 50
+  trend_filter_window: 200
+  train_bars: 240
+  test_bars: 80
+  max_walk_forward_windows: 4
+
+persistence:
+  database_url: sqlite+aiosqlite:///./trading_ai.db
+
+logging:
+  level: INFO
+  json_output: true

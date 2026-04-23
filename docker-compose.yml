@@ -1,0 +1,24 @@
+services:
+  api:
+    build: .
+    environment:
+      TRADING_AI_APP_MODE: paper
+      TRADING_AI_PERSISTENCE__DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trading_ai
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: trading_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

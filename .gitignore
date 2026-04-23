@@ -1,0 +1,11 @@
+.env
+.pytest_cache/
+__pycache__/
+*.pyc
+trading_ai.db
+dist/
+build/
+*.egg-info/
+*.pem
+*.sqlite
+*.db
