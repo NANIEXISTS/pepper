@@ -2,6 +2,21 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.5.0] - 2026-04-23
+
+### Added
+
+- Routed market-data provider stack with `ccxt` primary and Yahoo fallback
+- `ccxt` OHLCV provider with exchange capability checks and symbol normalization
+- Market-data validation for malformed OHLCV rows, duplicate timestamps, and intraday gap surfacing
+- Market-data tests for provider fallback, candle validation, hourly-to-4h resampling, and `ccxt` capability checks
+
+### Changed
+
+- Default runtime data mode now uses routed providers instead of Yahoo-only fetching
+- Dashboard and config payloads now expose provider routing metadata
+- Market-data endpoints now report provider, source timeframe, and detected gap count
+
 ## [0.4.0] - 2026-04-23
 
 ### Added

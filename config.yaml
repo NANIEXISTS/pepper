@@ -14,7 +14,10 @@ exchange:
   api_password: null
 
 data:
-  provider: yahoo
+  provider: router
+  provider_routing:
+    - ccxt
+    - yahoo
   base_url: https://query1.finance.yahoo.com
   request_timeout_seconds: 10.0
   supported_timeframes:
@@ -24,6 +27,11 @@ data:
     - 4h
     - 1d
   default_lookback_bars: 500
+  ccxt_quote_fallbacks:
+    - USDT
+    - USDC
+    - FDUSD
+    - BUSD
 
 risk:
   max_per_trade_risk_fraction: 0.01

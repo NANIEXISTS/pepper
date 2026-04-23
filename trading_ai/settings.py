@@ -24,11 +24,13 @@ class ExchangeSettings(BaseModel):
 
 
 class DataSettings(BaseModel):
-    provider: str = "yahoo"
+    provider: str = "router"
+    provider_routing: list[str] = Field(default_factory=lambda: ["ccxt", "yahoo"])
     base_url: str = "https://query1.finance.yahoo.com"
     request_timeout_seconds: float = Field(default=10.0, gt=0.0)
     supported_timeframes: list[str] = Field(default_factory=lambda: ["5m", "15m", "1h", "4h", "1d"])
     default_lookback_bars: int = Field(default=500, ge=50, le=5000)
+    ccxt_quote_fallbacks: list[str] = Field(default_factory=lambda: ["USDT", "USDC", "FDUSD", "BUSD"])
 
 
 class RiskSettings(BaseModel):

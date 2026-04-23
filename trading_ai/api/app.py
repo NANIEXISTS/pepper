@@ -14,8 +14,7 @@ from ..alerts import AlertService
 from ..agents import AgentContext
 from ..core.enums import TradeSignal, TradingMode
 from ..core.models import MarketDataRequest, OrderIntent, PortfolioSnapshot
-from ..data.providers import YahooFinanceProvider
-from ..data.service import MarketDataService
+from ..data import MarketDataService, build_market_data_provider
 from ..execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
 from ..features import FeatureEngineer
 from ..llm import LLMClient
@@ -33,7 +32,7 @@ def create_app() -> FastAPI:
     configure_logging(settings.logging.level)
 
     audit_store = TradeAuditStore.from_database_url(settings.persistence.database_url)
-    market_data_service = MarketDataService(YahooFinanceProvider(settings.data))
+    market_data_service = MarketDataService(build_market_data_provider(settings.data, settings.exchange))
     feature_engineer = FeatureEngineer()
     leakage_analyzer = FeatureLeakageAnalyzer()
     backtest_engine = BacktestEngine(settings.backtesting)
@@ -220,12 +219,17 @@ def create_app() -> FastAPI:
                 "mode": settings.app_mode.value,
                 "default_symbol": settings.default_symbol,
                 "provider": settings.data.provider,
+                "provider_routing": settings.data.provider_routing,
                 "supported_timeframes": settings.data.supported_timeframes,
+                "exchange_id": settings.exchange.exchange_id,
                 "live_trading_enabled": settings.execution.live_trading_enabled,
             },
             "market": {
                 "symbol": active_symbol,
                 "timeframe": active_timeframe,
+                "provider": market_frame.attrs.get("provider"),
+                "source_timeframe": market_frame.attrs.get("source_timeframe"),
+                "gap_count": market_frame.attrs.get("gap_count", 0),
                 "latest_timestamp": market_frame.index[-1].isoformat(),
                 "latest_price": float(market_frame.iloc[-1]["close"]),
                 "recent_bars": recent_market,
@@ -260,7 +264,9 @@ def create_app() -> FastAPI:
             "mode": settings.app_mode.value,
             "default_symbol": settings.default_symbol,
             "provider": settings.data.provider,
+            "provider_routing": settings.data.provider_routing,
             "supported_timeframes": settings.data.supported_timeframes,
+            "exchange_id": settings.exchange.exchange_id,
             "paper_trading_timeframe": settings.paper_trading.default_cycle_timeframe,
             "live_trading_enabled": settings.execution.live_trading_enabled,
         }
@@ -276,6 +282,9 @@ def create_app() -> FastAPI:
         return {
             "symbol": symbol,
             "timeframe": timeframe,
+            "provider": frame.attrs.get("provider"),
+            "source_timeframe": frame.attrs.get("source_timeframe"),
+            "gap_count": frame.attrs.get("gap_count", 0),
             "rows": len(frame),
             "columns": list(frame.columns),
             "latest": frame.tail(1).reset_index().to_dict(orient="records"),

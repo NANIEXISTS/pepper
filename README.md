@@ -38,7 +38,8 @@ Pepper is structured to avoid those failures by default.
 - Serves an operator console at `/dashboard` for portfolio, research, alerts, and agent-cycle monitoring
 - Supports writable paper-mode operator actions: create jobs, start/pause jobs, run jobs on demand, and submit manual paper orders
 - Schedules recurring paper cycles with persisted job state and run history
-- Normalizes market data asynchronously
+- Routes market data across `ccxt` and Yahoo with fallback handling
+- Normalizes market data asynchronously and rejects malformed OHLCV before features or trading logic see it
 - Computes deterministic bar-close features
 - Runs leakage-aware backtests with walk-forward validation
 - Tracks portfolio cash, equity, positions, and daily PnL anchor
@@ -77,6 +78,14 @@ The repo is built around a few hard rules:
 - No backtest should be trusted without leakage checks and walk-forward evaluation
 - No live trading should be enabled before paper-trading gates pass in the real world
 - RL may affect execution timing, not market direction
+
+## Data routing
+
+- Default market-data mode is routed: `ccxt` first, Yahoo fallback
+- `ccxt` capability checks require `fetchOHLCV` support before use
+- Duplicate timestamps and malformed candles are rejected
+- Intraday gaps are surfaced as warnings instead of passing silently
+- Yahoo remains available as a fallback for symbols or venues the exchange path cannot satisfy
 
 ## Repo layout
 

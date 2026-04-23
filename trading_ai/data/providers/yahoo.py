@@ -13,6 +13,8 @@ logger = get_logger(__name__)
 
 
 class YahooFinanceProvider(MarketDataProvider):
+    name = "yahoo"
+
     _INTERVAL_MAP = {
         "5m": "5m",
         "15m": "15m",
@@ -35,6 +37,7 @@ class YahooFinanceProvider(MarketDataProvider):
     async def fetch_ohlcv(self, request: MarketDataRequest) -> list[MarketBar]:
         requested_timeframe = request.timeframe
         provider_timeframe = self._provider_timeframe(requested_timeframe)
+        normalized_timeframe = self._normalized_timeframe(requested_timeframe, provider_timeframe)
         params = {
             "interval": provider_timeframe,
             "range": self._RANGE_MAP[requested_timeframe],
@@ -65,13 +68,13 @@ class YahooFinanceProvider(MarketDataProvider):
         ):
             if None in (open_, high, low, close, volume):
                 continue
-            bars.append(
-                MarketBar(
-                    symbol=request.symbol,
-                    timeframe=provider_timeframe,
-                    timestamp=datetime.fromtimestamp(timestamp, tz=UTC),
-                    open=float(open_),
-                    high=float(high),
+                bars.append(
+                    MarketBar(
+                        symbol=request.symbol,
+                        timeframe=normalized_timeframe,
+                        timestamp=datetime.fromtimestamp(timestamp, tz=UTC),
+                        open=float(open_),
+                        high=float(high),
                     low=float(low),
                     close=float(close),
                     volume=float(volume),
@@ -84,7 +87,7 @@ class YahooFinanceProvider(MarketDataProvider):
             provider="yahoo",
             symbol=request.symbol,
             requested_timeframe=request.timeframe,
-            provider_timeframe=provider_timeframe,
+            provider_timeframe=normalized_timeframe,
             bars=len(bars),
         )
         return bars
@@ -93,3 +96,11 @@ class YahooFinanceProvider(MarketDataProvider):
         if requested_timeframe not in self._INTERVAL_MAP:
             raise ValueError(f"Unsupported timeframe: {requested_timeframe}")
         return self._INTERVAL_MAP[requested_timeframe]
+
+    @staticmethod
+    def _normalized_timeframe(requested_timeframe: str, provider_timeframe: str) -> str:
+        if requested_timeframe == "4h":
+            return "1h"
+        if provider_timeframe == "60m":
+            return "1h"
+        return provider_timeframe
