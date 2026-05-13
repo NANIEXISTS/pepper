@@ -114,3 +114,17 @@ class PortfolioStateRecord(Base):
     daily_anchor_equity: Mapped[float] = mapped_column(Float, nullable=False)
     daily_anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
     positions_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class LiveReadinessRecord(Base):
+    __tablename__ = "live_readiness_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

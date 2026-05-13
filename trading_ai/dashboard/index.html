@@ -11,10 +11,10 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Pepper</p>
-          <h1>Operator Console</h1>
+          <h1>Profit Control Room</h1>
           <p class="hero-copy">
-            Research, risk, scheduling, and paper execution in one place. Operator actions stay
-            in paper mode and still route through the backend risk gate.
+            A client-readable path from idea to profit: prove an edge on data, size it so one
+            loss stays contained, and block live capital until operational gates are clear.
           </p>
         </div>
         <div class="hero-metrics">
@@ -58,21 +58,224 @@
 
       <section class="status-strip">
         <div class="status-card panel">
-          <span class="status-label">Latest bar</span>
+          <span class="status-label">Market</span>
           <strong id="latest-timestamp">-</strong>
         </div>
         <div class="status-card panel">
-          <span class="status-label">Last cycle</span>
+          <span class="status-label">Paper cycle</span>
           <strong id="cycle-status">No cycle yet</strong>
         </div>
         <div class="status-card panel">
-          <span class="status-label">Refresh state</span>
+          <span class="status-label">Data</span>
           <strong id="refresh-status">Idle</strong>
+        </div>
+        <div class="status-card panel">
+          <span class="status-label">Live decision</span>
+          <strong id="live-readiness-status">Blocked</strong>
         </div>
       </section>
 
-      <section class="operator-grid">
-        <article class="panel">
+      <section class="profit-path-grid">
+        <article class="panel profit-brief-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Profit Path</p>
+              <h2 id="profit-path-headline">Loading profit path</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Verdict</span>
+              <strong id="profit-path-verdict">-</strong>
+            </div>
+          </div>
+          <p id="profit-path-copy" class="brief-copy">
+            Pepper is not a profit promise. It is a process for finding repeatable edge, sizing risk,
+            and refusing trades or live launch when evidence is weak.
+          </p>
+          <div id="profit-path-steps" class="profit-steps"></div>
+        </article>
+
+        <article class="panel edge-lab-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Standout Feature</p>
+              <h2>One-Click Edge Scan</h2>
+            </div>
+          </div>
+          <p class="brief-copy">
+            Builds the typed strategy graph, sweeps parameters on training windows, and reports only
+            held-out walk-forward results. This is the practical bridge from "idea" to "worth paper testing."
+          </p>
+          <div class="job-actions">
+            <button id="edge-scan-button" class="button primary" type="button">Run Edge Scan</button>
+            <span id="edge-scan-status" class="metric-subtext">No scan has run in this session.</span>
+          </div>
+          <div id="edge-scan-summary" class="edge-scan-summary">
+            <p class="table-empty">Scan output will appear here.</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="market-context-grid">
+        <article class="panel hype-radar-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Narrative Intel</p>
+              <h2>Polymarket Hype Radar</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Mode</span>
+              <strong>read-only</strong>
+            </div>
+          </div>
+          <p class="brief-copy">
+            Watches public prediction-market attention and maps it to Pepper risk context. This is not
+            a trade signal and must not be mixed into the active 14-day paper experiment without restarting it.
+          </p>
+          <div id="hype-radar-summary" class="hype-summary"></div>
+          <div id="hype-radar-list" class="hype-event-list">
+            <p class="table-empty">Loading public narrative context.</p>
+          </div>
+        </article>
+
+        <article class="panel prediction-terminal-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Prediction Terminal</p>
+              <h2>Whales, Rules, Books, Arb</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Feeds</span>
+              <strong>public</strong>
+            </div>
+          </div>
+          <p class="brief-copy">
+            Combines public trader flow, resolution-rule risk, CLOB depth, Kalshi comparisons,
+            and source-watch queries into one operator surface.
+          </p>
+          <div id="prediction-terminal-summary" class="terminal-summary"></div>
+          <div class="terminal-columns">
+            <div>
+              <p class="panel-label">Wallet Flow</p>
+              <div id="terminal-wallets" class="terminal-list"></div>
+            </div>
+            <div>
+              <p class="panel-label">Market Risk</p>
+              <div id="terminal-risks" class="terminal-list"></div>
+            </div>
+          </div>
+          <div class="terminal-columns">
+            <div>
+              <p class="panel-label">Books / Arb</p>
+              <div id="terminal-books" class="terminal-list"></div>
+            </div>
+            <div>
+              <p class="panel-label">Source Watch</p>
+              <div id="terminal-sources" class="terminal-list"></div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="launch-brief-grid">
+        <article class="panel launch-brief-panel">
+          <div class="brief-verdict-row">
+            <div>
+              <p class="panel-label">Client Brief</p>
+              <h2 id="client-brief-answer">Not ready for live capital</h2>
+              <p id="client-brief-why" class="brief-copy">Waiting for readiness data.</p>
+            </div>
+            <div class="verdict-meter">
+              <span>Burn-in</span>
+              <strong id="burn-in-progress-label">0 / 28</strong>
+              <div class="progress-track" aria-hidden="true">
+                <span id="burn-in-progress" style="width: 0%"></span>
+              </div>
+            </div>
+          </div>
+          <div class="brief-action">
+            <span>Next action</span>
+            <strong id="client-next-action">Load the readiness summary.</strong>
+          </div>
+          <div id="client-proof-list" class="proof-grid"></div>
+        </article>
+
+        <article class="panel readiness-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Gate Evidence</p>
+              <h2 id="live-readiness-verdict">Gate Blocked</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Remaining</span>
+              <strong id="live-readiness-subtext">-</strong>
+            </div>
+          </div>
+          <div id="readiness-gates-list" class="gate-list"></div>
+          <div class="readiness-blockers">
+            <p class="panel-label">Plain-English Blockers</p>
+            <div id="readiness-blockers-list" class="tag-row"></div>
+          </div>
+        </article>
+      </section>
+
+      <details class="workspace-section">
+        <summary>Readiness Attestations</summary>
+        <article class="panel readiness-actions-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Admin Actions</p>
+              <h2>Attest Gate Evidence</h2>
+            </div>
+          </div>
+          <div class="readiness-actions">
+            <button id="drawdown-selftest-button" class="button subtle" type="button">Run Drawdown Self-Test</button>
+            <form id="credential-audit-form" class="compact-form">
+              <label>
+                Venue
+                <input id="credential-venue-input" type="text" value="alpaca" spellcheck="false">
+              </label>
+              <label>
+                Scope
+                <select id="credential-scope-select">
+                  <option value="read_only">Read only</option>
+                  <option value="trade" selected>Trade</option>
+                  <option value="trade_with_withdraw">Trade + withdraw</option>
+                </select>
+              </label>
+              <label>
+                Auditor
+                <input id="credential-auditor-input" type="text" value="ops-lead" spellcheck="false">
+              </label>
+              <label>
+                Notes
+                <input id="credential-notes-input" type="text" value="" spellcheck="true" placeholder="Optional">
+              </label>
+              <button id="credential-audit-button" class="button subtle" type="submit">Record Credential Audit</button>
+            </form>
+            <form id="ramp-plan-form" class="compact-form">
+              <label>
+                Venue
+                <input id="ramp-venue-input" type="text" value="alpaca" spellcheck="false">
+              </label>
+              <label>
+                Capital Cap Fraction
+                <input id="ramp-cap-input" type="number" value="0.005" min="0.0001" max="1" step="0.0001">
+              </label>
+              <label class="wide-field">
+                Notes
+                <input id="ramp-notes-input" type="text" value="" spellcheck="true" placeholder="Optional">
+              </label>
+              <button id="ramp-plan-button" class="button subtle" type="submit">Record Ramp Plan</button>
+            </form>
+            <p id="readiness-action-status" class="metric-subtext">No readiness action has run in this session.</p>
+          </div>
+        </article>
+      </details>
+
+      <details class="workspace-section">
+        <summary>Paper Trading Controls</summary>
+        <section class="operator-grid">
+          <article class="panel">
           <div class="panel-header">
             <div>
               <p class="panel-label">Operator</p>
@@ -108,9 +311,9 @@
             </label>
             <button id="job-submit-button" class="button primary" type="submit">Create Job</button>
           </form>
-        </article>
+          </article>
 
-        <article class="panel">
+          <article class="panel">
           <div class="panel-header">
             <div>
               <p class="panel-label">Operator</p>
@@ -153,11 +356,14 @@
             </label>
             <button id="manual-order-button" class="button primary" type="submit">Submit Manual Order</button>
           </form>
-        </article>
-      </section>
+          </article>
+        </section>
+      </details>
 
-      <section class="builder-grid">
-        <article class="panel">
+      <details class="workspace-section">
+        <summary>Strategy Builder</summary>
+        <section class="builder-grid">
+          <article class="panel">
           <div class="panel-header">
             <div>
               <p class="panel-label">Build / Validate / Run</p>
@@ -170,7 +376,7 @@
               <textarea
                 id="strategy-prompt-input"
                 rows="6"
-              >Buy when EMA 20 crosses above EMA 50, only when price is above EMA 200 and RSI 14 is below 70, with stop loss 3%.</textarea>
+              >Bollinger 20 mean reversion with 2 std bands, exit on revert to mid, only trade above EMA 200, with stop loss 2%.</textarea>
             </label>
             <div class="job-actions">
               <button id="strategy-draft-button" class="button subtle" type="submit">Build Graph</button>
@@ -181,9 +387,9 @@
               Draft a strategy into a typed graph first. Nothing here places orders.
             </p>
           </form>
-        </article>
+          </article>
 
-        <article class="panel">
+          <article class="panel">
           <div class="panel-header">
             <div>
               <p class="panel-label">Compiled Graph</p>
@@ -193,10 +399,11 @@
           <div id="strategy-graph" class="definition-list">
             <p class="table-empty">Build a strategy to inspect its graph, rules, and risk policy.</p>
           </div>
-        </article>
-      </section>
+          </article>
+        </section>
+      </details>
 
-      <section class="metrics-grid">
+      <section class="metrics-grid overview-strip">
         <article class="metric-card panel">
           <span class="metric-label">Portfolio Equity</span>
           <strong id="equity-value">-</strong>
@@ -229,7 +436,9 @@
         </article>
       </section>
 
-      <section class="content-grid">
+      <details class="workspace-section">
+        <summary>Operator Evidence</summary>
+        <section class="content-grid">
         <article class="panel chart-panel">
           <div class="panel-header">
             <div>
@@ -446,7 +655,8 @@
             <p class="table-empty">Venue capabilities will load with the dashboard.</p>
           </div>
         </article>
-      </section>
+        </section>
+      </details>
     </div>
     <script src="/assets/app.js" defer></script>
   </body>

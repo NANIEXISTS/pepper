@@ -64,7 +64,7 @@ paper_trading:
   starting_cash: 100000.0
   default_cycle_timeframe: 1h
   default_lookback_bars: 600
-  signal_confidence_threshold: 0.55
+  signal_confidence_threshold: 0.20
   schedule_interval_seconds: 300
 
 llm:
@@ -102,3 +102,11 @@ auth:
   enabled: false
   realm: Pepper Operator Console
   operators: []
+
+live_readiness:
+  required_burn_in_days: 28
+  profitability_review_days: 14
+  profitability_min_total_return_fraction: 0.0
+  credential_audit_valid_days: 90
+  drawdown_breaker_test_valid_days: 30
+  ramp_plan_max_capital_fraction: 0.01

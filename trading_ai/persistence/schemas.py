@@ -44,3 +44,11 @@ class OperatorAuditEventView(BaseModel):
     resource: str
     outcome: str
     details_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class LiveReadinessRecordView(BaseModel):
+    id: int
+    recorded_at: datetime
+    kind: str
+    recorded_by: str
+    payload: dict[str, Any] = Field(default_factory=dict)

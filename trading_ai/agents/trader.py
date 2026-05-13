@@ -36,7 +36,8 @@ class TraderAgent:
 
         if strategy.signal == TradeSignal.BUY:
             risk_budget = ctx.portfolio_equity * self.risk_settings.max_per_trade_risk_fraction
-            quantity = min(risk_budget / stop_distance, ctx.available_cash / latest_price)
+            cash_capacity_price = latest_price * 1.001
+            quantity = min(risk_budget / stop_distance, ctx.available_cash / cash_capacity_price)
             if quantity <= 0:
                 return None
             return OrderIntent(

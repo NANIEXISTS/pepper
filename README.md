@@ -38,6 +38,9 @@ Ready now:
 - strategy validation and backtesting through the existing research path
 - routed market data across `ccxt`, Alpaca, and Yahoo fallback
 - operator dashboard review of jobs, runs, trade audit, walk-forward windows, and venue assumptions
+- a Live Launch Brief that turns live-readiness state into a client-readable verdict, blockers, proof, and next action
+- read-only Polymarket hype radar for mapping public prediction-market attention to Pepper risk context
+- prediction-market terminal covering public whale flow, trader leaderboards, resolution-rule risk, CLOB depth, Kalshi comparisons, and source-watch queries
 
 Not ready yet:
 
@@ -67,6 +70,16 @@ That boundary is deliberate. The code path exists for live-routing foundations, 
 - Execute paper cycles only through the backend execution engine
 - Enforce `RiskAuditAgent.run()` before every order
 - Persist fills, vetoes, failures, and operator actions
+
+### Watch
+
+- Scan public Polymarket event volume for high-attention narratives
+- Map Bitcoin, macro, politics, and geopolitical markets to affected Pepper symbols
+- Track public leaderboard PnL snapshots and large public trade flow
+- Inspect market-rule ambiguity, UMA dispute markers, deadlines, and source dependencies
+- Review order-book spread, depth near mid, thin-book warnings, negative-risk flags, and fillability scores
+- Compare related Kalshi markets and mapped liquid underlyings before calling something an arbitrage
+- Generate source-monitor queries for official releases, news, X, and Telegram workflows
 
 ## Architecture
 
@@ -120,7 +133,15 @@ Inspect venue assumptions directly:
 
 Review live-readiness state directly:
 
-- `GET /readiness/live-gate`
+- `GET /readiness/live-gate` returns a composite `live_capital_allowed` verdict plus the list of `blocking_reasons`. Live capital is only enabled when the verdict is true.
+- `GET /readiness/paper-profitability` reports whether the latest 14 distinct UTC days of completed paper runs were net profitable from persisted portfolio equity.
+- The dashboard opens with a Live Launch Brief that translates the same verdict into plain language, then keeps readiness attestations and operator evidence available in collapsible workbench sections.
+
+Review public narrative context directly:
+
+- `GET /market-context/polymarket/hype` returns a read-only Polymarket Gamma scan ranked by relevance, 24-hour volume, and liquidity.
+- `GET /market-context/polymarket/terminal` returns the full prediction terminal report: hype, wallets, rules, CLOB microstructure, cross-venue candidates, and source-watch queries.
+- The dashboard shows the same context as Hype Radar plus a Prediction Terminal panel. These feeds inform research and operator review; they are not hidden order paths.
 
 ## Operator and safety model
 
@@ -131,6 +152,8 @@ Hard invariants:
 - no prompt executes directly into trading
 - no backtest is trusted without leakage checks and walk-forward context
 - live trading remains off until the burn-in gate is satisfied in the real world
+- the 14-day paper checkpoint must be measured from persisted equity, not operator memory or screenshots
+- public hype feeds are operator context only; using them as a model input requires a new experiment window
 
 Auth model:
 
@@ -173,10 +196,17 @@ Operator:
 - `GET /config`
 - `GET /venues/capabilities`
 - `GET /readiness/live-gate`
+- `GET /readiness/paper-profitability`
+- `GET /readiness/history`
+- `POST /readiness/credential-audit`
+- `POST /readiness/drawdown-breaker/selftest`
+- `POST /readiness/ramp-plan`
 
 Research:
 
 - `GET /market-data/{symbol}`
+- `GET /market-context/polymarket/hype`
+- `GET /market-context/polymarket/terminal`
 - `GET /features/{symbol}`
 - `GET /backtests/ema/{symbol}`
 - `POST /strategies/draft`

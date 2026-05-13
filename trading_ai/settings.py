@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
@@ -118,6 +119,15 @@ class AuthSettings(BaseModel):
     operators: list[OperatorAccountSettings] = Field(default_factory=list)
 
 
+class LiveReadinessSettings(BaseModel):
+    required_burn_in_days: int = Field(default=28, ge=1, le=365)
+    profitability_review_days: int = Field(default=14, ge=1, le=365)
+    profitability_min_total_return_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    credential_audit_valid_days: int = Field(default=90, ge=1, le=365)
+    drawdown_breaker_test_valid_days: int = Field(default=30, ge=1, le=365)
+    ramp_plan_max_capital_fraction: float = Field(default=0.01, gt=0.0, le=0.25)
+
+
 class TradingSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -137,6 +147,7 @@ class TradingSettings(BaseModel):
     persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    live_readiness: LiveReadinessSettings = Field(default_factory=LiveReadinessSettings)
 
 
 def _settings_source() -> Dynaconf:
@@ -150,7 +161,15 @@ def _settings_source() -> Dynaconf:
     )
 
 
+def _normalize_settings_keys(value):
+    if isinstance(value, Mapping):
+        return {str(key).lower(): _normalize_settings_keys(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_settings_keys(item) for item in value]
+    return value
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> TradingSettings:
-    raw_settings = _settings_source().as_dict()
+    raw_settings = _normalize_settings_keys(_settings_source().as_dict())
     return TradingSettings.model_validate(raw_settings)

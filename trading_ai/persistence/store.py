@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from ..core.models import ExecutionReport, OrderIntent, RiskDecision, TradeDecisionLog
-from .models import Base, OperatorAuditEvent, PaperCycleJobRecord, PaperCycleRunRecord, PortfolioStateRecord, TradeAuditEvent
-from .schemas import OperatorAuditEventView, PortfolioStateView, TradeAuditEventView
+from .models import (
+    Base,
+    LiveReadinessRecord,
+    OperatorAuditEvent,
+    PaperCycleJobRecord,
+    PaperCycleRunRecord,
+    PortfolioStateRecord,
+    TradeAuditEvent,
+)
+from .schemas import LiveReadinessRecordView, OperatorAuditEventView, PortfolioStateView, TradeAuditEventView
 
 if TYPE_CHECKING:
     from ..orchestration.models import PaperCycleJobCreate, PaperCycleJobView, PaperCycleRunView
@@ -22,7 +32,8 @@ class TradeAuditStore:
 
     @classmethod
     def from_database_url(cls, database_url: str) -> "TradeAuditStore":
-        engine = create_async_engine(database_url, future=True)
+        connect_args = {"timeout": 30.0} if database_url.startswith("sqlite") else {}
+        engine = create_async_engine(database_url, future=True, connect_args=connect_args)
         return cls(
             engine=engine,
             session_factory=async_sessionmaker(engine, expire_on_commit=False),
@@ -30,6 +41,9 @@ class TradeAuditStore:
 
     async def create_schema(self) -> None:
         async with self.engine.begin() as connection:
+            if self.engine.url.drivername.startswith("sqlite"):
+                await connection.exec_driver_sql("PRAGMA busy_timeout=30000")
+                await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             await connection.run_sync(Base.metadata.create_all)
 
     async def record_trade_event(
@@ -57,7 +71,7 @@ class TradeAuditStore:
                 metadata_payload=decision.metadata,
             )
             session.add(event)
-            await session.commit()
+            await self._commit(session)
 
     async def list_trade_events(self, *, limit: int = 50) -> list[TradeAuditEventView]:
         async with self.session_factory() as session:
@@ -86,7 +100,7 @@ class TradeAuditStore:
                 details_payload=details or {},
             )
             session.add(event)
-            await session.commit()
+            await self._commit(session)
 
     async def list_operator_actions(self, *, limit: int = 50) -> list[OperatorAuditEventView]:
         async with self.session_factory() as session:
@@ -115,7 +129,7 @@ class TradeAuditStore:
                 record.daily_anchor_date = state.daily_anchor_date
                 record.positions_payload = state.positions_payload
                 record.updated_at = datetime.now(UTC)
-            await session.commit()
+            await self._commit(session)
             await session.refresh(record)
             return self._to_portfolio_state_view(record)
 
@@ -136,7 +150,7 @@ class TradeAuditStore:
                 is_active=payload.auto_start,
             )
             session.add(job)
-            await session.commit()
+            await self._commit(session)
             await session.refresh(job)
             return self._to_job_view(job)
 
@@ -163,7 +177,7 @@ class TradeAuditStore:
                 return None
             job.is_active = is_active
             job.updated_at = datetime.now(UTC)
-            await session.commit()
+            await self._commit(session)
             await session.refresh(job)
             return self._to_job_view(job)
 
@@ -193,7 +207,7 @@ class TradeAuditStore:
                     job.last_status = "running"
                     job.last_error = None
                     job.updated_at = now
-            await session.commit()
+            await self._commit(session)
             await session.refresh(run)
             return run.id
 
@@ -228,7 +242,7 @@ class TradeAuditStore:
                     job.last_error = error_message
                     job.updated_at = now
 
-            await session.commit()
+            await self._commit(session)
             await session.refresh(run)
             return self._to_run_view(run)
 
@@ -242,8 +256,63 @@ class TradeAuditStore:
             runs = result.scalars().all()
             return [self._to_run_view(run) for run in runs]
 
+    async def record_live_readiness_event(
+        self,
+        *,
+        kind: str,
+        recorded_by: str,
+        payload: dict,
+    ) -> LiveReadinessRecordView:
+        async with self.session_factory() as session:
+            record = LiveReadinessRecord(
+                kind=kind,
+                recorded_by=recorded_by,
+                payload=payload,
+            )
+            session.add(record)
+            await self._commit(session)
+            await session.refresh(record)
+            return self._to_live_readiness_view(record)
+
+    async def list_live_readiness_events(
+        self,
+        *,
+        kind: str | None = None,
+        limit: int = 50,
+    ) -> list[LiveReadinessRecordView]:
+        async with self.session_factory() as session:
+            query = select(LiveReadinessRecord)
+            if kind is not None:
+                query = query.where(LiveReadinessRecord.kind == kind)
+            query = query.order_by(desc(LiveReadinessRecord.id)).limit(limit)
+            result = await session.execute(query)
+            records = result.scalars().all()
+            return [self._to_live_readiness_view(record) for record in records]
+
+    async def latest_live_readiness_events(self) -> dict[str, LiveReadinessRecordView]:
+        async with self.session_factory() as session:
+            query = select(LiveReadinessRecord).order_by(desc(LiveReadinessRecord.id))
+            result = await session.execute(query)
+            latest: dict[str, LiveReadinessRecordView] = {}
+            for record in result.scalars().all():
+                if record.kind in latest:
+                    continue
+                latest[record.kind] = self._to_live_readiness_view(record)
+            return latest
+
     async def close(self) -> None:
         await self.engine.dispose()
+
+    async def _commit(self, session: AsyncSession) -> None:
+        for attempt in range(5):
+            try:
+                await session.commit()
+                return
+            except OperationalError as exc:
+                if "database is locked" not in str(exc).lower() or attempt == 4:
+                    raise
+                await session.rollback()
+                await asyncio.sleep(0.05 * (attempt + 1))
 
     def _to_job_view(self, job: PaperCycleJobRecord) -> PaperCycleJobView:
         from ..orchestration.models import PaperCycleJobView
@@ -322,4 +391,13 @@ class TradeAuditStore:
             resource=event.resource,
             outcome=event.outcome,
             details_payload=event.details_payload,
+        )
+
+    def _to_live_readiness_view(self, record: LiveReadinessRecord) -> LiveReadinessRecordView:
+        return LiveReadinessRecordView(
+            id=record.id,
+            recorded_at=record.recorded_at,
+            kind=record.kind,
+            recorded_by=record.recorded_by,
+            payload=record.payload,
         )

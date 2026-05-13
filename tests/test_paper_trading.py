@@ -7,6 +7,9 @@ import pandas as pd
 import pytest
 
 from trading_ai.alerts import AlertService
+from trading_ai.agents import TraderAgent
+from trading_ai.agents.models import AgentContext, StrategyOutput
+from trading_ai.core.enums import TradeSignal
 from trading_ai.execution import CcxtLiveOrderRouter, ExecutionEngine, PaperOrderRouter
 from trading_ai.features import FeatureEngineer
 from trading_ai.llm import LLMClient
@@ -15,7 +18,7 @@ from trading_ai.persistence import TradeAuditStore
 from trading_ai.portfolio import PortfolioService, Position
 from trading_ai.reinforcement import ExecutionTimingCoordinator
 from trading_ai.risk import RiskAuditAgent
-from trading_ai.settings import TradingSettings
+from trading_ai.settings import PaperTradingSettings, RiskSettings, TradingSettings
 
 
 def _market_frame(rows: int = 600) -> pd.DataFrame:
@@ -81,6 +84,44 @@ async def test_paper_trading_cycle_runs_and_emits_alert(tmp_path: Path) -> None:
     assert cycle.alert is not None
     assert market_data.requested_symbols[0] == "BTC-USD"
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_paper_trading_buy_reserves_cash_for_slippage() -> None:
+    settings = TradingSettings(
+        paper_trading=PaperTradingSettings(signal_confidence_threshold=0.0),
+        risk=RiskSettings(max_per_trade_risk_fraction=0.05),
+    )
+    frame = pd.DataFrame(
+        {"close": [100.0], "atr_14": [0.5], "macd_histogram": [0.01]},
+        index=pd.date_range("2025-01-01", periods=1, freq="1h", tz="UTC"),
+    )
+    context = AgentContext(
+        symbol="BTC-USD",
+        timeframe="1h",
+        market_frame=frame,
+        features=frame,
+        portfolio_equity=100_000.0,
+        available_cash=100_000.0,
+        positions={},
+    )
+    strategy = StrategyOutput(
+        agent_name="test-strategy",
+        signal=TradeSignal.BUY,
+        confidence=0.25,
+        rationale="Force BUY to test sizing capacity.",
+    )
+
+    trader = TraderAgent(
+        risk_settings=settings.risk,
+        paper_settings=settings.paper_trading,
+        execution_timing=ExecutionTimingCoordinator(settings.reinforcement),
+    )
+    order = await trader.run(context, strategy)
+
+    assert order is not None
+    simulated_fill_price = order.entry_price * 1.0002
+    assert order.quantity * simulated_fill_price <= context.available_cash
 
 
 @pytest.mark.asyncio

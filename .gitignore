@@ -1,7 +1,10 @@
 .env
 .pytest_cache/
+.claude/
 __pycache__/
 *.pyc
+*.log
+*.pid
 trading_ai.db
 dist/
 build/
@@ -9,3 +12,5 @@ build/
 *.pem
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
