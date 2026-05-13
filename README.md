@@ -80,6 +80,7 @@ That boundary is deliberate. The code path exists for live-routing foundations, 
 - Review order-book spread, depth near mid, thin-book warnings, negative-risk flags, and fillability scores
 - Compare related Kalshi markets and mapped liquid underlyings before calling something an arbitrage
 - Generate source-monitor queries for official releases, news, X, and Telegram workflows
+- Save terminal snapshots and compare wallet PnL, whale flow, rule risk, and book-quality deltas over time
 
 ## Architecture
 
@@ -141,6 +142,8 @@ Review public narrative context directly:
 
 - `GET /market-context/polymarket/hype` returns a read-only Polymarket Gamma scan ranked by relevance, 24-hour volume, and liquidity.
 - `GET /market-context/polymarket/terminal` returns the full prediction terminal report: hype, wallets, rules, CLOB microstructure, cross-venue candidates, and source-watch queries.
+- `POST /market-context/polymarket/terminal/snapshots` saves a terminal report so later runs can produce wallet, flow, rule-risk, and book-quality deltas.
+- `GET /market-context/polymarket/terminal/snapshots` and `GET /market-context/polymarket/terminal/delta` expose the saved history and latest change summary.
 - The dashboard shows the same context as Hype Radar plus a Prediction Terminal panel. These feeds inform research and operator review; they are not hidden order paths.
 
 ## Operator and safety model
@@ -207,6 +210,9 @@ Research:
 - `GET /market-data/{symbol}`
 - `GET /market-context/polymarket/hype`
 - `GET /market-context/polymarket/terminal`
+- `POST /market-context/polymarket/terminal/snapshots`
+- `GET /market-context/polymarket/terminal/snapshots`
+- `GET /market-context/polymarket/terminal/delta`
 - `GET /features/{symbol}`
 - `GET /backtests/ema/{symbol}`
 - `POST /strategies/draft`

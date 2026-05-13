@@ -20,6 +20,9 @@ const elements = {
   hypeRadarSummary: document.getElementById("hype-radar-summary"),
   hypeRadarList: document.getElementById("hype-radar-list"),
   predictionTerminalSummary: document.getElementById("prediction-terminal-summary"),
+  terminalSnapshotButton: document.getElementById("terminal-snapshot-button"),
+  terminalSnapshotStatus: document.getElementById("terminal-snapshot-status"),
+  terminalDeltaSummary: document.getElementById("terminal-delta-summary"),
   terminalWallets: document.getElementById("terminal-wallets"),
   terminalRisks: document.getElementById("terminal-risks"),
   terminalBooks: document.getElementById("terminal-books"),
@@ -477,6 +480,78 @@ function renderPredictionTerminal(report) {
       </article>
     `)
     .join("") || '<p class="table-empty">No source watch queries generated.</p>';
+}
+
+function renderTerminalHistory(history) {
+  if (!elements.terminalDeltaSummary) {
+    return;
+  }
+  const snapshots = history?.snapshots || [];
+  const delta = history?.delta || {};
+  if (!snapshots.length) {
+    elements.terminalDeltaSummary.innerHTML =
+      '<p class="table-empty">No saved terminal snapshots yet. Save one to start tracking deltas.</p>';
+    return;
+  }
+  if (delta.available === false) {
+    elements.terminalDeltaSummary.innerHTML = `
+      <div class="terminal-card">
+        <header>
+          <strong>${snapshots.length} saved snapshot${snapshots.length === 1 ? "" : "s"}</strong>
+          <span class="tag warning">baseline</span>
+        </header>
+        <p>${escapeHtml(delta.reason || "Need another snapshot to compute movement.")}</p>
+      </div>
+    `;
+    return;
+  }
+  const summary = delta.summary || {};
+  const topWallet = (delta.wallet_deltas || [])[0];
+  const topTrade = (delta.new_whale_trades || [])[0];
+  elements.terminalDeltaSummary.innerHTML = `
+    <div class="mini-metrics">
+      <div>
+        <span>Wallet moves</span>
+        <strong>${Number(summary.wallet_delta_count || 0)}</strong>
+      </div>
+      <div>
+        <span>New whale trades</span>
+        <strong>${Number(summary.new_whale_trade_count || 0)}</strong>
+      </div>
+      <div>
+        <span>Rule changes</span>
+        <strong>${Number(summary.resolution_risk_change_count || 0)}</strong>
+      </div>
+      <div>
+        <span>Book changes</span>
+        <strong>${Number(summary.microstructure_change_count || 0)}</strong>
+      </div>
+    </div>
+    <div class="terminal-columns">
+      <article class="terminal-card">
+        <header>
+          <strong>Top wallet delta</strong>
+          <span class="tag">${topWallet ? escapeHtml(topWallet.status) : "none"}</span>
+        </header>
+        <p>${
+          topWallet
+            ? `${escapeHtml(topWallet.user_name || topWallet.wallet)} moved ${money(topWallet.pnl_change || 0)} PnL and ${money(topWallet.volume_change || 0)} volume.`
+            : "No wallet delta yet."
+        }</p>
+      </article>
+      <article class="terminal-card">
+        <header>
+          <strong>Latest new flow</strong>
+          <span class="tag">${topTrade ? escapeHtml(topTrade.signal || "flow") : "none"}</span>
+        </header>
+        <p>${
+          topTrade
+            ? `${escapeHtml(topTrade.side)} ${escapeHtml(topTrade.outcome || "outcome")} on ${escapeHtml(topTrade.title)} for ${money(topTrade.notional || 0)}.`
+            : "No new whale trade versus the prior snapshot."
+        }</p>
+      </article>
+    </div>
+  `;
 }
 
 function optimizationGridFor(graph) {
@@ -1143,6 +1218,7 @@ function renderOverview(overview) {
   renderProfitPath(overview.profit_path);
   renderHypeRadar(marketContext?.polymarket_hype);
   renderPredictionTerminal(marketContext?.prediction_terminal);
+  renderTerminalHistory(marketContext?.prediction_terminal_history);
   renderAlerts(alerts || []);
   renderJobs(jobs || []);
   renderRuns(runs || []);
@@ -1491,6 +1567,30 @@ async function runEdgeScan() {
   }
 }
 
+async function saveTerminalSnapshot() {
+  elements.terminalSnapshotButton.disabled = true;
+  elements.terminalSnapshotStatus.textContent = "Saving terminal snapshot.";
+  try {
+    const params = new URLSearchParams({
+      symbol: state.symbol,
+      limit: "8",
+    });
+    const result = await apiRequest(`/market-context/polymarket/terminal/snapshots?${params.toString()}`, {
+      method: "POST",
+    });
+    elements.terminalSnapshotStatus.textContent = `Saved snapshot #${result.snapshot.id}.`;
+    renderTerminalHistory({
+      snapshots: [result.snapshot],
+      delta: result.delta,
+    });
+    await fetchOverview();
+  } catch (error) {
+    elements.terminalSnapshotStatus.textContent = error.message;
+  } finally {
+    elements.terminalSnapshotButton.disabled = false;
+  }
+}
+
 async function refresh() {
   state.symbol = elements.symbolInput.value.trim().toUpperCase() || "BTC-USD";
   state.timeframe = elements.timeframeSelect.value;
@@ -1519,6 +1619,7 @@ elements.strategyForm.addEventListener("submit", buildStrategy);
 elements.strategyValidateButton.addEventListener("click", validateStrategy);
 elements.strategyBacktestButton.addEventListener("click", backtestStrategy);
 elements.edgeScanButton.addEventListener("click", runEdgeScan);
+elements.terminalSnapshotButton.addEventListener("click", saveTerminalSnapshot);
 
 window.addEventListener("load", () => {
   elements.jobSymbolInput.value = state.symbol;

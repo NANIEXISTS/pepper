@@ -25,7 +25,7 @@ from ..llm import LLMClient
 from ..logging_config import configure_logging
 from ..market_context import PolymarketHypeService
 from ..orchestration import ManualPaperOrderRequest, PaperCycleJobCreate, PaperTradingScheduler, build_default_paper_trading_service
-from ..persistence import LiveReadinessRecordView, TradeAuditStore
+from ..persistence import LiveReadinessRecordView, PredictionTerminalSnapshotView, TradeAuditStore
 from ..portfolio import PortfolioService
 from ..readiness import evaluate_paper_profitability
 from ..reinforcement import ExecutionTimingCoordinator
@@ -203,6 +203,179 @@ def create_app() -> FastAPI:
             return (await polymarket_hype.fetch_terminal(symbol=symbol, limit=limit)).model_dump(mode="json")
         except Exception as exc:
             return polymarket_hype.unavailable_terminal_report(symbol=symbol, error=str(exc)).model_dump(mode="json")
+
+    def _prediction_terminal_snapshot_delta(
+        latest: PredictionTerminalSnapshotView | None,
+        previous: PredictionTerminalSnapshotView | None,
+    ) -> dict:
+        if latest is None:
+            return {
+                "available": False,
+                "reason": "No prediction terminal snapshot has been recorded yet.",
+                "wallet_deltas": [],
+                "new_whale_trades": [],
+                "resolution_risk_changes": [],
+                "microstructure_changes": [],
+                "summary": {},
+            }
+        if previous is None:
+            return {
+                "available": False,
+                "reason": "Need at least two snapshots before deltas are meaningful.",
+                "latest_snapshot_id": latest.id,
+                "latest_created_at": latest.created_at.isoformat(),
+                "wallet_deltas": [],
+                "new_whale_trades": [],
+                "resolution_risk_changes": [],
+                "microstructure_changes": [],
+                "summary": {
+                    "leaderboard_size": len(latest.report_payload.get("wallets", {}).get("leaderboard", [])),
+                    "whale_trade_count": len(latest.report_payload.get("wallets", {}).get("whale_trades", [])),
+                },
+            }
+
+        latest_payload = latest.report_payload
+        previous_payload = previous.report_payload
+        latest_wallets = {
+            entry.get("wallet", "").lower(): entry
+            for entry in latest_payload.get("wallets", {}).get("leaderboard", [])
+            if entry.get("wallet")
+        }
+        previous_wallets = {
+            entry.get("wallet", "").lower(): entry
+            for entry in previous_payload.get("wallets", {}).get("leaderboard", [])
+            if entry.get("wallet")
+        }
+        wallet_deltas = []
+        for wallet, current in latest_wallets.items():
+            prior = previous_wallets.get(wallet)
+            if prior is None:
+                wallet_deltas.append(
+                    {
+                        "wallet": current.get("wallet"),
+                        "user_name": current.get("user_name"),
+                        "rank": current.get("rank"),
+                        "rank_change": None,
+                        "pnl_change": current.get("pnl", 0),
+                        "volume_change": current.get("volume", 0),
+                        "status": "new_leader",
+                    }
+                )
+                continue
+            wallet_deltas.append(
+                {
+                    "wallet": current.get("wallet"),
+                    "user_name": current.get("user_name"),
+                    "rank": current.get("rank"),
+                    "rank_change": (prior.get("rank") or 0) - (current.get("rank") or 0),
+                    "pnl_change": (current.get("pnl") or 0) - (prior.get("pnl") or 0),
+                    "volume_change": (current.get("volume") or 0) - (prior.get("volume") or 0),
+                    "status": "tracked",
+                }
+            )
+        wallet_deltas.sort(key=lambda row: abs(row.get("pnl_change") or 0), reverse=True)
+
+        previous_trade_keys = {
+            _trade_key(trade)
+            for trade in previous_payload.get("wallets", {}).get("whale_trades", [])
+        }
+        new_whale_trades = [
+            trade
+            for trade in latest_payload.get("wallets", {}).get("whale_trades", [])
+            if _trade_key(trade) not in previous_trade_keys
+        ]
+
+        previous_risk = {
+            item.get("slug"): item
+            for item in previous_payload.get("resolution", {}).get("items", [])
+            if item.get("slug")
+        }
+        resolution_risk_changes = []
+        for item in latest_payload.get("resolution", {}).get("items", []):
+            prior = previous_risk.get(item.get("slug"))
+            if prior is None:
+                continue
+            score_change = (item.get("ambiguity_score") or 0) - (prior.get("ambiguity_score") or 0)
+            new_flags = sorted(set(item.get("risk_flags", [])) - set(prior.get("risk_flags", [])))
+            if score_change or new_flags:
+                resolution_risk_changes.append(
+                    {
+                        "slug": item.get("slug"),
+                        "title": item.get("title"),
+                        "ambiguity_score_change": score_change,
+                        "new_flags": new_flags,
+                    }
+                )
+
+        previous_books = {
+            item.get("token_id"): item
+            for item in previous_payload.get("microstructure", {}).get("items", [])
+            if item.get("token_id")
+        }
+        microstructure_changes = []
+        for item in latest_payload.get("microstructure", {}).get("items", []):
+            prior = previous_books.get(item.get("token_id"))
+            if prior is None:
+                continue
+            spread_change = _float_or_zero(item.get("spread")) - _float_or_zero(prior.get("spread"))
+            fill_score_change = _float_or_zero(item.get("fill_probability_score")) - _float_or_zero(
+                prior.get("fill_probability_score")
+            )
+            new_flags = sorted(set(item.get("flags", [])) - set(prior.get("flags", [])))
+            if spread_change or fill_score_change or new_flags:
+                microstructure_changes.append(
+                    {
+                        "token_id": item.get("token_id"),
+                        "title": item.get("title"),
+                        "spread_change": spread_change,
+                        "fill_probability_score_change": fill_score_change,
+                        "new_flags": new_flags,
+                    }
+                )
+
+        return {
+            "available": True,
+            "latest_snapshot_id": latest.id,
+            "previous_snapshot_id": previous.id,
+            "latest_created_at": latest.created_at.isoformat(),
+            "previous_created_at": previous.created_at.isoformat(),
+            "wallet_deltas": wallet_deltas[:10],
+            "new_whale_trades": new_whale_trades[:10],
+            "resolution_risk_changes": resolution_risk_changes[:10],
+            "microstructure_changes": microstructure_changes[:10],
+            "summary": {
+                "wallet_delta_count": len(wallet_deltas),
+                "new_whale_trade_count": len(new_whale_trades),
+                "resolution_risk_change_count": len(resolution_risk_changes),
+                "microstructure_change_count": len(microstructure_changes),
+            },
+        }
+
+    async def _prediction_terminal_snapshot_history(*, symbol: str, limit: int = 5) -> dict:
+        snapshots = await audit_store.list_prediction_terminal_snapshots(symbol=symbol, limit=limit)
+        latest = snapshots[0] if snapshots else None
+        previous = snapshots[1] if len(snapshots) > 1 else None
+        return {
+            "snapshots": [snapshot.model_dump(mode="json") for snapshot in snapshots],
+            "delta": _prediction_terminal_snapshot_delta(latest, previous),
+        }
+
+    def _float_or_zero(value: Any) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _trade_key(trade: dict) -> tuple:
+        return (
+            str(trade.get("wallet") or "").lower(),
+            str(trade.get("slug") or ""),
+            str(trade.get("side") or ""),
+            str(trade.get("outcome") or ""),
+            str(trade.get("timestamp") or ""),
+            round(_float_or_zero(trade.get("price")), 6),
+            round(_float_or_zero(trade.get("size")), 6),
+        )
 
     async def _record_operator_action(
         operator: AuthenticatedOperator,
@@ -643,6 +816,7 @@ def create_app() -> FastAPI:
             "market_context": {
                 "polymarket_hype": await _polymarket_hype_report(symbol=active_symbol, limit=10),
                 "prediction_terminal": await _polymarket_terminal_report(symbol=active_symbol, limit=8),
+                "prediction_terminal_history": await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2),
             },
             "live_readiness": live_readiness,
             "strategy_builder": {
@@ -727,6 +901,53 @@ def create_app() -> FastAPI:
         if limit < 1 or limit > 25:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 25.")
         return await _polymarket_terminal_report(symbol=symbol or settings.default_symbol, limit=limit)
+
+    @app.post("/market-context/polymarket/terminal/snapshots")
+    async def record_polymarket_prediction_terminal_snapshot(
+        symbol: str | None = None,
+        limit: int = 8,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
+        if limit < 1 or limit > 25:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 25.")
+        active_symbol = (symbol or settings.default_symbol).upper()
+        report = await _polymarket_terminal_report(symbol=active_symbol, limit=limit)
+        snapshot = await audit_store.record_prediction_terminal_snapshot(
+            symbol=active_symbol,
+            report_payload=report,
+        )
+        await _record_operator_action(
+            operator,
+            action="record_prediction_terminal_snapshot",
+            resource=active_symbol,
+            outcome="recorded",
+            details={"snapshot_id": snapshot.id},
+        )
+        history = await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2)
+        return {
+            "snapshot": snapshot.model_dump(mode="json"),
+            "delta": history["delta"],
+        }
+
+    @app.get("/market-context/polymarket/terminal/snapshots")
+    async def list_polymarket_prediction_terminal_snapshots(
+        symbol: str | None = None,
+        limit: int = 20,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 100.")
+        active_symbol = (symbol or settings.default_symbol).upper()
+        return await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=limit)
+
+    @app.get("/market-context/polymarket/terminal/delta")
+    async def polymarket_prediction_terminal_delta(
+        symbol: str | None = None,
+        _: AuthenticatedOperator = Depends(auth.require_viewer),
+    ) -> dict:
+        active_symbol = (symbol or settings.default_symbol).upper()
+        history = await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2)
+        return history["delta"]
 
     @app.get("/readiness/live-gate")
     async def live_gate_readiness(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:

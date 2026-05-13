@@ -128,3 +128,16 @@ class LiveReadinessRecord(Base):
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
     recorded_by: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class PredictionTerminalSnapshotRecord(Base):
+    __tablename__ = "prediction_terminal_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

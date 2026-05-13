@@ -17,9 +17,16 @@ from .models import (
     PaperCycleJobRecord,
     PaperCycleRunRecord,
     PortfolioStateRecord,
+    PredictionTerminalSnapshotRecord,
     TradeAuditEvent,
 )
-from .schemas import LiveReadinessRecordView, OperatorAuditEventView, PortfolioStateView, TradeAuditEventView
+from .schemas import (
+    LiveReadinessRecordView,
+    OperatorAuditEventView,
+    PortfolioStateView,
+    PredictionTerminalSnapshotView,
+    TradeAuditEventView,
+)
 
 if TYPE_CHECKING:
     from ..orchestration.models import PaperCycleJobCreate, PaperCycleJobView, PaperCycleRunView
@@ -300,6 +307,37 @@ class TradeAuditStore:
                 latest[record.kind] = self._to_live_readiness_view(record)
             return latest
 
+    async def record_prediction_terminal_snapshot(
+        self,
+        *,
+        symbol: str,
+        report_payload: dict,
+    ) -> PredictionTerminalSnapshotView:
+        async with self.session_factory() as session:
+            record = PredictionTerminalSnapshotRecord(
+                symbol=symbol.upper(),
+                report_payload=report_payload,
+            )
+            session.add(record)
+            await self._commit(session)
+            await session.refresh(record)
+            return self._to_prediction_terminal_snapshot_view(record)
+
+    async def list_prediction_terminal_snapshots(
+        self,
+        *,
+        symbol: str | None = None,
+        limit: int = 20,
+    ) -> list[PredictionTerminalSnapshotView]:
+        async with self.session_factory() as session:
+            query = select(PredictionTerminalSnapshotRecord)
+            if symbol is not None:
+                query = query.where(PredictionTerminalSnapshotRecord.symbol == symbol.upper())
+            query = query.order_by(desc(PredictionTerminalSnapshotRecord.id)).limit(limit)
+            result = await session.execute(query)
+            records = result.scalars().all()
+            return [self._to_prediction_terminal_snapshot_view(record) for record in records]
+
     async def close(self) -> None:
         await self.engine.dispose()
 
@@ -400,4 +438,15 @@ class TradeAuditStore:
             kind=record.kind,
             recorded_by=record.recorded_by,
             payload=record.payload,
+        )
+
+    def _to_prediction_terminal_snapshot_view(
+        self,
+        record: PredictionTerminalSnapshotRecord,
+    ) -> PredictionTerminalSnapshotView:
+        return PredictionTerminalSnapshotView(
+            id=record.id,
+            created_at=record.created_at,
+            symbol=record.symbol,
+            report_payload=record.report_payload,
         )

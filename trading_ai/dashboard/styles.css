@@ -359,6 +359,16 @@ textarea {
   margin-top: 0;
 }
 
+.terminal-delta {
+  display: grid;
+  gap: 12px;
+}
+
+.terminal-delta .mini-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 0;
+}
+
 .terminal-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -961,7 +971,8 @@ th:last-child {
   }
 
   .terminal-columns,
-  .terminal-summary .mini-metrics {
+  .terminal-summary .mini-metrics,
+  .terminal-delta .mini-metrics {
     grid-template-columns: 1fr;
   }
 }
@@ -1004,6 +1015,7 @@ th:last-child {
   .profit-steps,
   .terminal-columns,
   .terminal-summary .mini-metrics,
+  .terminal-delta .mini-metrics,
   .compact-form {
     grid-template-columns: 1fr;
   }

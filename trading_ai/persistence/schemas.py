@@ -52,3 +52,10 @@ class LiveReadinessRecordView(BaseModel):
     kind: str
     recorded_by: str
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PredictionTerminalSnapshotView(BaseModel):
+    id: int
+    created_at: datetime
+    symbol: str
+    report_payload: dict[str, Any] = Field(default_factory=dict)

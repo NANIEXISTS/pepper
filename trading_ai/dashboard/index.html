@@ -153,6 +153,13 @@
             and source-watch queries into one operator surface.
           </p>
           <div id="prediction-terminal-summary" class="terminal-summary"></div>
+          <div class="job-actions">
+            <button id="terminal-snapshot-button" class="button secondary" type="button">Save Snapshot</button>
+            <span id="terminal-snapshot-status" class="metric-subtext">No snapshot saved this session.</span>
+          </div>
+          <div id="terminal-delta-summary" class="terminal-delta">
+            <p class="table-empty">Snapshot deltas appear after at least two saved terminal snapshots.</p>
+          </div>
           <div class="terminal-columns">
             <div>
               <p class="panel-label">Wallet Flow</p>

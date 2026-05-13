@@ -49,6 +49,8 @@ Pepper stores the verification artifacts needed for burn-in review:
 
 `GET /market-context/polymarket/hype` and `GET /market-context/polymarket/terminal` are product intelligence surfaces, not readiness evidence sources. They can support research and operator review by exposing public prediction-market hype, wallet flow, rule risk, book quality, cross-venue comparisons, and source-watch queries. They do not authorize live capital or bypass execution/risk controls.
 
+`POST /market-context/polymarket/terminal/snapshots` persists public terminal snapshots for trend review. Snapshot deltas can show wallet PnL movement, new whale trades, rule-risk changes, and book-quality movement, but those deltas remain research context until a separate strategy path explicitly consumes and validates them.
+
 ## Drawdown-breaker self-test
 
 `POST /readiness/drawdown-breaker/selftest` (admin only) synthesises a portfolio whose daily PnL has just crossed the configured drawdown limit, runs the live `RiskAuditAgent`, and asserts it refuses the order and flags the circuit breaker. The outcome is persisted and time-bounded by `drawdown_breaker_test_valid_days`.

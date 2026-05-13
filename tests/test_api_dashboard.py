@@ -188,6 +188,7 @@ def test_dashboard_data_route_returns_overview(monkeypatch, tmp_path: Path) -> N
     assert payload["market_context"]["prediction_terminal"]["wallets"]["leaderboard"][0]["user_name"] == "top_trader"
     assert payload["market_context"]["prediction_terminal"]["microstructure"]["items"]
     assert payload["market_context"]["prediction_terminal"]["cross_venue"]["candidates"]
+    assert payload["market_context"]["prediction_terminal_history"]["delta"]["available"] is False
     assert "strategy_builder" in payload
     assert payload["profit_path"]["risk_size_preview"]["quantity"] >= 0
     assert payload["profit_path"]["edge"]["leakage_check_passed"] is True
