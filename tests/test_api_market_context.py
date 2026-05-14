@@ -175,6 +175,32 @@ def test_polymarket_prediction_terminal_endpoint_returns_all_sections(monkeypatc
     assert payload["source_monitor"]["items"]
 
 
+def test_polymarket_profit_hunter_endpoint_returns_paper_verdict(monkeypatch, tmp_path: Path) -> None:
+    from trading_ai.api import app as app_module
+
+    settings = TradingSettings(
+        app_mode=TradingMode.PAPER,
+        persistence=PersistenceSettings(database_url=f"sqlite+aiosqlite:///{(tmp_path / 'hunter.db').as_posix()}"),
+        logging=LoggingSettings(level="INFO"),
+    )
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(app_module, "PolymarketHypeService", FakePolymarketHypeService)
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/market-context/polymarket/hunter/run"
+            "?symbol=MSTR&horizon_minutes=60&max_stake_usd=25&min_trade_score=0.72&limit=3&record_snapshot=true"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["report"]["mode"] == "paper"
+    assert payload["report"]["verdict"] in {"TRADE", "NO_TRADE", "INSUFFICIENT_EDGE"}
+    assert payload["report"]["candidate_count"] >= 1
+    assert payload["report"]["max_stake_usd"] == 25
+    assert payload["snapshot"]["symbol"] == "MSTR"
+
+
 def test_polymarket_prediction_terminal_rejects_invalid_limit(monkeypatch, tmp_path: Path) -> None:
     from trading_ai.api import app as app_module
 

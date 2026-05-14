@@ -75,6 +75,34 @@
         </div>
       </section>
 
+      <section class="hunter-grid">
+        <article class="panel profit-hunter-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">One-Hour Profit Hunter</p>
+              <h2 id="profit-hunter-answer">Can Pepper find profit now?</h2>
+            </div>
+            <div class="panel-highlight">
+              <span>Verdict</span>
+              <strong id="profit-hunter-verdict">Loading</strong>
+            </div>
+          </div>
+          <p id="profit-hunter-why" class="brief-copy">
+            Pepper scans Polymarket like a trader would: source latency, negative-risk baskets,
+            CLOB spread/depth, whale deltas, and rule ambiguity. It creates a paper ticket only
+            when every gate is strong enough.
+          </p>
+          <div class="hunter-actions">
+            <button id="profit-hunter-button" class="button primary" type="button">Run 1h Hunter</button>
+            <span id="profit-hunter-status" class="metric-subtext">Waiting for the first scan.</span>
+          </div>
+          <div id="profit-hunter-ticket" class="hunter-ticket">
+            <p class="table-empty">No paper ticket yet.</p>
+          </div>
+          <div id="profit-hunter-candidates" class="hunter-candidates"></div>
+        </article>
+      </section>
+
       <section class="profit-path-grid">
         <article class="panel profit-brief-panel">
           <div class="panel-header">
@@ -115,6 +143,8 @@
         </article>
       </section>
 
+      <details class="workspace-section market-context-details">
+        <summary>Prediction Market Deep Dive</summary>
       <section class="market-context-grid">
         <article class="panel hype-radar-panel">
           <div class="panel-header">
@@ -182,6 +212,7 @@
           </div>
         </article>
       </section>
+      </details>
 
       <section class="launch-brief-grid">
         <article class="panel launch-brief-panel">

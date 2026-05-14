@@ -4,6 +4,7 @@ const state = {
   overview: null,
   strategyDraft: null,
   strategyBacktest: null,
+  profitHunter: null,
 };
 
 const elements = {
@@ -27,6 +28,13 @@ const elements = {
   terminalRisks: document.getElementById("terminal-risks"),
   terminalBooks: document.getElementById("terminal-books"),
   terminalSources: document.getElementById("terminal-sources"),
+  profitHunterAnswer: document.getElementById("profit-hunter-answer"),
+  profitHunterVerdict: document.getElementById("profit-hunter-verdict"),
+  profitHunterWhy: document.getElementById("profit-hunter-why"),
+  profitHunterButton: document.getElementById("profit-hunter-button"),
+  profitHunterStatus: document.getElementById("profit-hunter-status"),
+  profitHunterTicket: document.getElementById("profit-hunter-ticket"),
+  profitHunterCandidates: document.getElementById("profit-hunter-candidates"),
   edgeScanButton: document.getElementById("edge-scan-button"),
   edgeScanStatus: document.getElementById("edge-scan-status"),
   edgeScanSummary: document.getElementById("edge-scan-summary"),
@@ -552,6 +560,97 @@ function renderTerminalHistory(history) {
       </article>
     </div>
   `;
+}
+
+function renderProfitHunter(report) {
+  if (
+    !report ||
+    !elements.profitHunterAnswer ||
+    !elements.profitHunterVerdict ||
+    !elements.profitHunterWhy ||
+    !elements.profitHunterTicket ||
+    !elements.profitHunterCandidates
+  ) {
+    return;
+  }
+  state.profitHunter = report;
+
+  const verdict = report.verdict || "INSUFFICIENT_EDGE";
+  const trade = report.trade_candidate;
+  const ticket = trade?.paper_ticket;
+  const verdictCopy =
+    verdict === "TRADE"
+      ? "Paper trade candidate found"
+      : verdict === "NO_TRADE"
+        ? "No safe one-hour trade right now"
+        : "Not enough edge yet";
+  elements.profitHunterAnswer.textContent = verdictCopy;
+  elements.profitHunterVerdict.textContent = verdict;
+  elements.profitHunterVerdict.className =
+    verdict === "TRADE" ? "positive" : verdict === "NO_TRADE" ? "warning-text" : "negative";
+  elements.profitHunterWhy.textContent =
+    verdict === "TRADE" && trade
+      ? `${trade.method.replaceAll("_", " ")} passed the paper gates on ${trade.title}. Review the ticket before acting.`
+      : report.no_trade_reason || "The hunter needs stronger market context before it can issue a paper ticket.";
+  if (elements.profitHunterStatus) {
+    const generatedAt = report.generated_at ? new Date(report.generated_at).toLocaleTimeString() : "now";
+    elements.profitHunterStatus.textContent =
+      `${Number(report.candidate_count || 0)} candidates scanned at ${generatedAt}. Top score ${number(report.top_score || 0, 2)}.`;
+  }
+
+  if (ticket) {
+    elements.profitHunterTicket.innerHTML = `
+      <article class="hunter-ticket-card">
+        <div>
+          <span class="metric-label">Paper ticket</span>
+          <strong>${escapeHtml(ticket.side)} ${escapeHtml(ticket.outcome || "outcome")}</strong>
+          <p>${escapeHtml(ticket.title)}</p>
+        </div>
+        <div class="split-list">
+          <div><span class="metric-label">Entry</span><strong>${number(ticket.entry_price, 4)}</strong></div>
+          <div><span class="metric-label">Size</span><strong>${money(ticket.notional_usd)}</strong></div>
+          <div><span class="metric-label">Stop</span><strong>${number(ticket.stop_loss_price, 4)}</strong></div>
+          <div><span class="metric-label">Target</span><strong>${number(ticket.take_profit_price, 4)}</strong></div>
+        </div>
+        <p class="metric-subtext">${escapeHtml(ticket.exit_plan)}</p>
+      </article>
+    `;
+  } else {
+    elements.profitHunterTicket.innerHTML = `
+      <article class="hunter-ticket-card muted-ticket">
+        <strong>No paper ticket issued</strong>
+        <p>${escapeHtml(report.no_trade_reason || "The current market does not clear the hunter gates.")}</p>
+      </article>
+    `;
+  }
+
+  const candidates = report.candidates || [];
+  elements.profitHunterCandidates.innerHTML = candidates.length
+    ? candidates
+        .slice(0, 4)
+        .map((candidate) => {
+          const blockers = candidate.blockers?.length
+            ? candidate.blockers.slice(0, 3).map((blocker) => `<span class="tag warning">${escapeHtml(blocker)}</span>`).join("")
+            : '<span class="tag success">gates clear</span>';
+          return `
+            <article class="hunter-candidate">
+              <header>
+                <strong>#${Number(candidate.rank)} ${escapeHtml(candidate.method.replaceAll("_", " "))}</strong>
+                <span class="tag">${number(candidate.score, 2)} score</span>
+              </header>
+              <p>${escapeHtml(candidate.title)}</p>
+              <div class="split-list">
+                <div><span class="metric-label">Spread</span><strong>${candidate.spread == null ? "-" : number(candidate.spread, 4)}</strong></div>
+                <div><span class="metric-label">Fill</span><strong>${percent(candidate.fill_probability_score || 0)}</strong></div>
+                <div><span class="metric-label">24h Vol</span><strong>${money(candidate.volume_24h || 0)}</strong></div>
+                <div><span class="metric-label">Rule risk</span><strong>${percent(candidate.ambiguity_score || 0)}</strong></div>
+              </div>
+              <div class="tag-row">${blockers}</div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="table-empty">No hunter candidates available yet.</p>';
 }
 
 function optimizationGridFor(graph) {
@@ -1216,6 +1315,7 @@ function renderOverview(overview) {
   renderPositions(portfolio.positions);
   renderPortfolioBreakdown(portfolioBreakdown || []);
   renderProfitPath(overview.profit_path);
+  renderProfitHunter(marketContext?.profit_hunter);
   renderHypeRadar(marketContext?.polymarket_hype);
   renderPredictionTerminal(marketContext?.prediction_terminal);
   renderTerminalHistory(marketContext?.prediction_terminal_history);
@@ -1591,6 +1691,33 @@ async function saveTerminalSnapshot() {
   }
 }
 
+async function runProfitHunter() {
+  elements.profitHunterButton.disabled = true;
+  elements.profitHunterStatus.textContent = "Scanning one-hour opportunity set.";
+  try {
+    const params = new URLSearchParams({
+      symbol: state.symbol,
+      horizon_minutes: "60",
+      max_stake_usd: "25",
+      min_trade_score: "0.72",
+      limit: "8",
+      record_snapshot: "true",
+    });
+    const result = await apiRequest(`/market-context/polymarket/hunter/run?${params.toString()}`, {
+      method: "POST",
+    });
+    renderProfitHunter(result.report);
+    if (result.snapshot) {
+      elements.terminalSnapshotStatus.textContent = `Hunter saved snapshot #${result.snapshot.id}.`;
+    }
+    await fetchOverview();
+  } catch (error) {
+    elements.profitHunterStatus.textContent = error.message;
+  } finally {
+    elements.profitHunterButton.disabled = false;
+  }
+}
+
 async function refresh() {
   state.symbol = elements.symbolInput.value.trim().toUpperCase() || "BTC-USD";
   state.timeframe = elements.timeframeSelect.value;
@@ -1620,6 +1747,7 @@ elements.strategyValidateButton.addEventListener("click", validateStrategy);
 elements.strategyBacktestButton.addEventListener("click", backtestStrategy);
 elements.edgeScanButton.addEventListener("click", runEdgeScan);
 elements.terminalSnapshotButton.addEventListener("click", saveTerminalSnapshot);
+elements.profitHunterButton.addEventListener("click", runProfitHunter);
 
 window.addEventListener("load", () => {
   elements.jobSymbolInput.value = state.symbol;

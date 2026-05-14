@@ -2,6 +2,20 @@
 
 All notable changes to this project will be tracked here.
 
+## [0.8.2] - 2026-05-14
+
+### Added
+
+- Paper-only Polymarket Profit Hunter that ranks one-hour opportunities across CLOB spread/depth, volume, liquidity, wallet flow, source-watch context, negative-risk structure, and rule ambiguity
+- `POST /market-context/polymarket/hunter/run` endpoint that returns `TRADE`, `NO_TRADE`, or `INSUFFICIENT_EDGE` plus exact blockers and a paper ticket only when all gates pass
+- Dashboard "One-Hour Profit Hunter" panel with a client-readable verdict, paper-ticket area, and top candidate blockers
+
+### Changed
+
+- Moved the noisy prediction-market terminal detail behind a collapsible dashboard deep dive so the primary UI answers whether Pepper has a safe one-hour paper opportunity now
+- Kept cross-venue matches as watchlist items only; unconfirmed rule matches cannot dominate the trade verdict or create tickets
+- Negative-risk markets now require a computed basket edge or directional confirmation before a paper ticket can be issued
+
 ## [0.7.0] - 2026-04-23
 
 ### Added

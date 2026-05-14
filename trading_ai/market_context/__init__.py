@@ -1,3 +1,4 @@
+from .hunter import PolymarketProfitHunter
 from .polymarket import PolymarketHypeService
 from .models import (
     ClobMicrostructureItem,
@@ -7,6 +8,9 @@ from .models import (
     PolymarketHypeEvent,
     PolymarketHypeReport,
     PredictionTerminalReport,
+    ProfitHunterCandidate,
+    ProfitHunterPaperTicket,
+    ProfitHunterReport,
     ResolutionRiskItem,
     ResolutionRiskReport,
     SourceMonitorItem,
@@ -24,7 +28,11 @@ __all__ = [
     "PolymarketHypeEvent",
     "PolymarketHypeReport",
     "PolymarketHypeService",
+    "PolymarketProfitHunter",
     "PredictionTerminalReport",
+    "ProfitHunterCandidate",
+    "ProfitHunterPaperTicket",
+    "ProfitHunterReport",
     "ResolutionRiskItem",
     "ResolutionRiskReport",
     "SourceMonitorItem",

@@ -129,6 +129,7 @@ table th {
 .builder-grid,
 .operator-grid,
 .profit-path-grid,
+.hunter-grid,
 .market-context-grid,
 .launch-brief-grid,
 .status-strip,
@@ -216,6 +217,61 @@ textarea {
 .profit-path-grid {
   grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
   margin-bottom: 18px;
+}
+
+.hunter-grid {
+  margin-bottom: 18px;
+}
+
+.profit-hunter-panel {
+  border-color: rgba(115, 213, 178, 0.34);
+  background:
+    radial-gradient(circle at 12% 14%, rgba(115, 213, 178, 0.16), transparent 30%),
+    linear-gradient(135deg, rgba(20, 36, 34, 0.9), rgba(16, 18, 27, 0.92));
+}
+
+.hunter-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.hunter-ticket,
+.hunter-candidates {
+  display: grid;
+  gap: 12px;
+}
+
+.hunter-ticket-card,
+.hunter-candidate {
+  border: 1px solid rgba(168, 185, 216, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  background: rgba(6, 10, 16, 0.42);
+}
+
+.hunter-ticket-card {
+  display: grid;
+  gap: 14px;
+}
+
+.hunter-candidate header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.hunter-candidate p,
+.hunter-ticket-card p {
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
+.muted-ticket {
+  border-style: dashed;
 }
 
 .market-context-grid {

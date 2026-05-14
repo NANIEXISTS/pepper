@@ -141,7 +141,10 @@ def test_dashboard_route_serves_html(monkeypatch, tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "Pepper Operator Console" in response.text
     assert "Profit Control Room" in response.text
+    assert "One-Hour Profit Hunter" in response.text
+    assert "Run 1h Hunter" in response.text
     assert "One-Click Edge Scan" in response.text
+    assert "Prediction Market Deep Dive" in response.text
     assert "Whales, Rules, Books, Arb" in response.text
     assert "Client Brief" in response.text
     assert "Not ready for live capital" in response.text
@@ -189,6 +192,8 @@ def test_dashboard_data_route_returns_overview(monkeypatch, tmp_path: Path) -> N
     assert payload["market_context"]["prediction_terminal"]["microstructure"]["items"]
     assert payload["market_context"]["prediction_terminal"]["cross_venue"]["candidates"]
     assert payload["market_context"]["prediction_terminal_history"]["delta"]["available"] is False
+    assert payload["market_context"]["profit_hunter"]["mode"] == "paper"
+    assert payload["market_context"]["profit_hunter"]["verdict"] in {"TRADE", "NO_TRADE", "INSUFFICIENT_EDGE"}
     assert "strategy_builder" in payload
     assert payload["profit_path"]["risk_size_preview"]["quantity"] >= 0
     assert payload["profit_path"]["edge"]["leakage_check_passed"] is True

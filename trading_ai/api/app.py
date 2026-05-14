@@ -23,7 +23,7 @@ from ..execution import ExecutionEngine, PaperOrderRouter, build_live_order_rout
 from ..features import FeatureEngineer
 from ..llm import LLMClient
 from ..logging_config import configure_logging
-from ..market_context import PolymarketHypeService
+from ..market_context import PolymarketHypeService, PolymarketProfitHunter, PredictionTerminalReport
 from ..orchestration import ManualPaperOrderRequest, PaperCycleJobCreate, PaperTradingScheduler, build_default_paper_trading_service
 from ..persistence import LiveReadinessRecordView, PredictionTerminalSnapshotView, TradeAuditStore
 from ..portfolio import PortfolioService
@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
     strategy_compiler = StrategyCompiler()
     venue_catalog = VenueCatalogService(settings)
     polymarket_hype = PolymarketHypeService()
+    polymarket_hunter = PolymarketProfitHunter()
     execution_timing = ExecutionTimingCoordinator(settings.reinforcement)
     risk_agent = RiskAuditAgent(settings.risk)
     execution_engine = ExecutionEngine(
@@ -158,6 +159,7 @@ def create_app() -> FastAPI:
     app.state.strategy_compiler = strategy_compiler
     app.state.venue_catalog = venue_catalog
     app.state.polymarket_hype = polymarket_hype
+    app.state.polymarket_hunter = polymarket_hunter
     app.state.auth_enabled = settings.auth.enabled
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
@@ -198,11 +200,14 @@ def create_app() -> FastAPI:
         except Exception as exc:
             return polymarket_hype.unavailable_report(symbol=symbol, error=str(exc)).model_dump(mode="json")
 
-    async def _polymarket_terminal_report(*, symbol: str | None, limit: int = 8) -> dict:
+    async def _polymarket_terminal_model(*, symbol: str | None, limit: int = 8) -> PredictionTerminalReport:
         try:
-            return (await polymarket_hype.fetch_terminal(symbol=symbol, limit=limit)).model_dump(mode="json")
+            return await polymarket_hype.fetch_terminal(symbol=symbol, limit=limit)
         except Exception as exc:
-            return polymarket_hype.unavailable_terminal_report(symbol=symbol, error=str(exc)).model_dump(mode="json")
+            return polymarket_hype.unavailable_terminal_report(symbol=symbol, error=str(exc))
+
+    async def _polymarket_terminal_report(*, symbol: str | None, limit: int = 8) -> dict:
+        return (await _polymarket_terminal_model(symbol=symbol, limit=limit)).model_dump(mode="json")
 
     def _prediction_terminal_snapshot_delta(
         latest: PredictionTerminalSnapshotView | None,
@@ -749,6 +754,15 @@ def create_app() -> FastAPI:
             }
             for window in backtest_summary["walk_forward"]["windows"]
         ]
+        terminal_model = await _polymarket_terminal_model(symbol=active_symbol, limit=8)
+        terminal_history = await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2)
+        hunter_report = polymarket_hunter.run(
+            terminal_model,
+            snapshot_delta=terminal_history["delta"],
+            horizon_minutes=60,
+            max_stake_usd=25.0,
+            limit=8,
+        )
 
         return {
             "config": {
@@ -814,9 +828,10 @@ def create_app() -> FastAPI:
             "trade_audit": [event.model_dump(mode="json") for event in await audit_store.list_trade_events(limit=8)],
             "venues": venue_catalog.describe().model_dump(mode="json"),
             "market_context": {
-                "polymarket_hype": await _polymarket_hype_report(symbol=active_symbol, limit=10),
-                "prediction_terminal": await _polymarket_terminal_report(symbol=active_symbol, limit=8),
-                "prediction_terminal_history": await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2),
+                "polymarket_hype": terminal_model.hype.model_dump(mode="json"),
+                "prediction_terminal": terminal_model.model_dump(mode="json"),
+                "prediction_terminal_history": terminal_history,
+                "profit_hunter": hunter_report.model_dump(mode="json"),
             },
             "live_readiness": live_readiness,
             "strategy_builder": {
@@ -948,6 +963,60 @@ def create_app() -> FastAPI:
         active_symbol = (symbol or settings.default_symbol).upper()
         history = await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2)
         return history["delta"]
+
+    @app.post("/market-context/polymarket/hunter/run")
+    async def run_polymarket_profit_hunter(
+        symbol: str | None = None,
+        horizon_minutes: int = 60,
+        max_stake_usd: float = 25.0,
+        min_trade_score: float = 0.72,
+        limit: int = 8,
+        record_snapshot: bool = False,
+        operator: AuthenticatedOperator = Depends(auth.require_trader),
+    ) -> dict:
+        if horizon_minutes < 5 or horizon_minutes > 240:
+            raise HTTPException(status_code=400, detail="horizon_minutes must be between 5 and 240.")
+        if max_stake_usd <= 0 or max_stake_usd > 500:
+            raise HTTPException(status_code=400, detail="max_stake_usd must be between 0 and 500.")
+        if min_trade_score < 0 or min_trade_score > 1:
+            raise HTTPException(status_code=400, detail="min_trade_score must be between 0 and 1.")
+        if limit < 1 or limit > 25:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 25.")
+
+        active_symbol = (symbol or settings.default_symbol).upper()
+        terminal_model = await _polymarket_terminal_model(symbol=active_symbol, limit=limit)
+        history = await _prediction_terminal_snapshot_history(symbol=active_symbol, limit=2)
+        report = polymarket_hunter.run(
+            terminal_model,
+            snapshot_delta=history["delta"],
+            horizon_minutes=horizon_minutes,
+            max_stake_usd=max_stake_usd,
+            min_trade_score=min_trade_score,
+            limit=limit,
+        )
+        snapshot = None
+        if record_snapshot:
+            snapshot = await audit_store.record_prediction_terminal_snapshot(
+                symbol=active_symbol,
+                report_payload=terminal_model.model_dump(mode="json"),
+            )
+        await _record_operator_action(
+            operator,
+            action="run_polymarket_profit_hunter",
+            resource=active_symbol,
+            outcome=report.verdict.lower(),
+            details={
+                "horizon_minutes": horizon_minutes,
+                "max_stake_usd": max_stake_usd,
+                "candidate_count": report.candidate_count,
+                "top_score": report.top_score,
+                "snapshot_id": snapshot.id if snapshot else None,
+            },
+        )
+        return {
+            "report": report.model_dump(mode="json"),
+            "snapshot": snapshot.model_dump(mode="json") if snapshot else None,
+        }
 
     @app.get("/readiness/live-gate")
     async def live_gate_readiness(_: AuthenticatedOperator = Depends(auth.require_viewer)) -> dict:

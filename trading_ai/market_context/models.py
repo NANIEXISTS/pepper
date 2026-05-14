@@ -182,3 +182,82 @@ class PredictionTerminalReport(BaseModel):
         "Public prediction-market intelligence only. It can support research, source monitoring, "
         "and operator review, but it is not an order path."
     )
+
+
+ProfitHunterVerdict = Literal["TRADE", "NO_TRADE", "INSUFFICIENT_EDGE"]
+ProfitHunterMethod = Literal[
+    "source_latency",
+    "crypto_close",
+    "negative_risk_basket",
+    "wallet_delta",
+    "clob_microstructure",
+    "cross_venue_arb_watch",
+]
+
+
+class ProfitHunterPaperTicket(BaseModel):
+    venue: str = "polymarket"
+    mode: Literal["paper"] = "paper"
+    side: Literal["BUY_YES", "BUY_NO", "WATCH"] = "BUY_YES"
+    title: str
+    slug: str
+    outcome: str = ""
+    token_id: str = ""
+    entry_price: float = Field(ge=0.0, le=1.0)
+    quantity: float = Field(ge=0.0)
+    notional_usd: float = Field(ge=0.0)
+    max_loss_usd: float = Field(ge=0.0)
+    take_profit_price: float = Field(ge=0.0, le=1.0)
+    stop_loss_price: float = Field(ge=0.0, le=1.0)
+    time_stop_minutes: int = Field(ge=1)
+    exit_plan: str
+
+
+class ProfitHunterCandidate(BaseModel):
+    rank: int = Field(ge=1)
+    method: ProfitHunterMethod
+    title: str
+    slug: str
+    source_url: str
+    outcome: str = ""
+    token_id: str = ""
+    score: float = Field(ge=0.0, le=1.0)
+    estimated_edge_score: float = Field(ge=0.0, le=1.0)
+    best_bid: float | None = None
+    best_ask: float | None = None
+    spread: float | None = None
+    fill_probability_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    volume_24h: float = Field(default=0.0, ge=0.0)
+    liquidity: float = Field(default=0.0, ge=0.0)
+    ambiguity_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    whale_notional_usd: float = Field(default=0.0, ge=0.0)
+    new_whale_flow: bool = False
+    negative_risk: bool = False
+    blockers: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    source_checks: list[str] = Field(default_factory=list)
+    paper_ticket: ProfitHunterPaperTicket | None = None
+
+
+class ProfitHunterReport(BaseModel):
+    source: str = "pepper_polymarket_profit_hunter"
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    available: bool = True
+    requested_symbol: str | None = None
+    horizon_minutes: int = Field(default=60, ge=5, le=240)
+    mode: Literal["paper"] = "paper"
+    verdict: ProfitHunterVerdict
+    action: str
+    candidate_count: int = Field(default=0, ge=0)
+    top_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_trade_score: float = Field(default=0.72, ge=0.0, le=1.0)
+    max_stake_usd: float = Field(default=25.0, gt=0.0)
+    no_trade_reason: str = ""
+    trade_candidate: ProfitHunterCandidate | None = None
+    candidates: list[ProfitHunterCandidate] = Field(default_factory=list)
+    summary: dict[str, int | float | str] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    safe_use: str = (
+        "Paper-only opportunity ranking. This report can create a paper ticket for review, "
+        "but it does not place Polymarket orders or guarantee profit."
+    )

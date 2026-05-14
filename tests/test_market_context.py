@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from trading_ai.market_context import PolymarketHypeService
+from trading_ai.market_context import PolymarketHypeService, PolymarketProfitHunter
 
 
 def test_polymarket_hype_maps_crypto_and_macro_narratives() -> None:
@@ -147,3 +147,108 @@ def test_prediction_terminal_builds_wallet_rules_books_arb_and_sources() -> None
     assert report.cross_venue.candidates[0].kalshi_ticker == "KXBTC150-26"
     assert report.cross_venue.candidates[0].probability_gap is not None
     assert "Major exchange BTC/USD reference prices" in report.source_monitor.items[0].official_sources
+
+
+def test_polymarket_profit_hunter_creates_paper_ticket_for_clear_edge() -> None:
+    service = PolymarketHypeService()
+    terminal = service.build_terminal(
+        [
+            {
+                "title": "2026 FIFA World Cup Winner",
+                "slug": "2026-fifa-world-cup-winner",
+                "description": "This market resolves based on the official tournament winner.",
+                "volume24hr": 2_000_000,
+                "volume": 900_000_000,
+                "liquidity": 250_000,
+                "tags": [{"label": "Sports"}],
+                "markets": [
+                    {
+                        "active": True,
+                        "closed": False,
+                        "acceptingOrders": True,
+                        "enableOrderBook": True,
+                        "outcomes": '["Brazil","Other"]',
+                        "outcomePrices": '["0.20","0.80"]',
+                        "clobTokenIds": '["111","222"]',
+                        "bestBid": 0.19,
+                        "bestAsk": 0.20,
+                        "spread": 0.01,
+                        "negRisk": True,
+                    }
+                ],
+            }
+        ],
+        trades=[
+            {
+                "proxyWallet": "0xedge",
+                "side": "BUY",
+                "title": "2026 FIFA World Cup Winner",
+                "slug": "2026-fifa-world-cup-winner",
+                "outcome": "Brazil",
+                "size": 300,
+                "price": 0.20,
+                "timestamp": 1_778_600_000,
+            }
+        ],
+        books_by_token={
+            "111": {
+                "bids": [{"price": "0.19", "size": "5000"}],
+                "asks": [{"price": "0.20", "size": "5000"}],
+                "neg_risk": True,
+            }
+        },
+        limit=4,
+    )
+
+    report = PolymarketProfitHunter().run(terminal, horizon_minutes=60, max_stake_usd=25)
+
+    assert report.verdict == "TRADE"
+    assert report.trade_candidate is not None
+    assert report.trade_candidate.paper_ticket is not None
+    assert report.trade_candidate.method == "negative_risk_basket"
+    assert report.trade_candidate.paper_ticket.notional_usd == 25
+
+
+def test_polymarket_profit_hunter_blocks_wide_spreads() -> None:
+    service = PolymarketHypeService()
+    terminal = service.build_terminal(
+        [
+            {
+                "title": "Will Bitcoin hit $150k in 2026?",
+                "slug": "bitcoin-150k-2026",
+                "description": "This market resolves from major exchange BTC/USD prices.",
+                "volume24hr": 2_000_000,
+                "volume": 30_000_000,
+                "liquidity": 250_000,
+                "tags": [{"label": "Bitcoin"}],
+                "markets": [
+                    {
+                        "active": True,
+                        "closed": False,
+                        "acceptingOrders": True,
+                        "enableOrderBook": True,
+                        "outcomes": '["Yes","No"]',
+                        "outcomePrices": '["0.40","0.60"]',
+                        "clobTokenIds": '["111","222"]',
+                        "bestBid": 0.34,
+                        "bestAsk": 0.41,
+                        "spread": 0.07,
+                    }
+                ],
+            }
+        ],
+        books_by_token={
+            "111": {
+                "bids": [{"price": "0.34", "size": "5000"}],
+                "asks": [{"price": "0.41", "size": "5000"}],
+            }
+        },
+        symbol="BTC-USD",
+        limit=4,
+    )
+
+    report = PolymarketProfitHunter().run(terminal)
+
+    assert report.verdict == "NO_TRADE"
+    assert report.trade_candidate is None
+    assert "spread_above_2c" in report.candidates[0].blockers
