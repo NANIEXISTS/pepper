@@ -144,9 +144,9 @@ def test_dashboard_route_serves_html(monkeypatch, tmp_path: Path) -> None:
     assert "5-Min Buy/Sell Test" in response.text
     assert "Run 1h Hunter" in response.text
     assert "One-Click Edge Scan" in response.text
-    assert "Prediction Market Deep Dive" in response.text
+    assert "Prediction Market Terminal" in response.text
     assert "Whales, Rules, Books, Arb" in response.text
-    assert "Client Brief" in response.text
+    assert "Decision" in response.text
     assert "Not ready for live capital" in response.text
     assert "Run Drawdown Self-Test" in response.text
     assert response.headers["content-type"].startswith("text/html")
