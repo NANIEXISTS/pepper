@@ -139,9 +139,9 @@ def test_dashboard_route_serves_html(monkeypatch, tmp_path: Path) -> None:
         response = client.get("/dashboard")
 
     assert response.status_code == 200
-    assert "Pepper Operator Console" in response.text
-    assert "Profit Control Room" in response.text
-    assert "One-Hour Profit Hunter" in response.text
+    assert "Pepper Trading Cockpit" in response.text
+    assert "Trading Cockpit" in response.text
+    assert "5-Min Buy/Sell Test" in response.text
     assert "Run 1h Hunter" in response.text
     assert "One-Click Edge Scan" in response.text
     assert "Prediction Market Deep Dive" in response.text
