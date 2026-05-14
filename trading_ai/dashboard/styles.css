@@ -1004,12 +1004,173 @@ th:last-child {
   color: #ffaea6;
 }
 
+.cockpit-shell {
+  max-width: 1640px;
+  padding-top: 24px;
+}
+
+.terminal-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(310px, 0.36fr);
+  gap: 22px;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.terminal-hero h1 {
+  margin: 4px 0 0;
+  font-size: clamp(2.45rem, 5vw, 5.6rem);
+  line-height: 0.92;
+  letter-spacing: -0.07em;
+}
+
+.compact-hero-metrics {
+  grid-template-columns: 1fr;
+}
+
+.control-bar {
+  display: grid;
+  grid-template-columns: auto auto minmax(280px, 1fr);
+  gap: 18px;
+  align-items: end;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.control-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.control-status span {
+  display: grid;
+  gap: 5px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(7, 10, 16, 0.34);
+  border: 1px solid rgba(168, 185, 216, 0.09);
+}
+
+.control-status b {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.control-status strong {
+  overflow: hidden;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-kpis {
+  grid-template-columns: minmax(210px, 1.35fr) repeat(5, minmax(150px, 1fr));
+  margin-bottom: 14px;
+}
+
+.cockpit-kpis .metric-card {
+  min-height: 142px;
+}
+
+.hero-kpi {
+  border-color: rgba(115, 213, 178, 0.34);
+  background:
+    radial-gradient(circle at 16% 10%, rgba(115, 213, 178, 0.18), transparent 36%),
+    rgba(20, 24, 34, 0.82);
+}
+
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(390px, 0.58fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+.side-rail {
+  display: grid;
+  gap: 18px;
+}
+
+.market-cockpit-card {
+  min-height: 700px;
+  background:
+    radial-gradient(circle at 82% 10%, rgba(245, 182, 103, 0.13), transparent 30%),
+    linear-gradient(135deg, rgba(115, 213, 178, 0.08), rgba(15, 20, 31, 0.94)),
+    var(--bg-elevated);
+}
+
+.hero-chart {
+  min-height: 465px;
+}
+
+.market-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.cockpit-decision .brief-verdict-row {
+  grid-template-columns: 1fr;
+}
+
+.cockpit-decision .brief-verdict-row h2 {
+  font-size: clamp(1.8rem, 2.7vw, 3rem);
+}
+
+.cockpit-decision .brief-copy,
+.cockpit-agent p,
+.paper-drill-panel .metric-subtext {
+  font-size: 0.94rem;
+}
+
+.compact-proof-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.paper-drill-panel {
+  border-color: rgba(245, 182, 103, 0.3);
+  background:
+    radial-gradient(circle at 88% 8%, rgba(245, 182, 103, 0.16), transparent 32%),
+    rgba(20, 24, 34, 0.82);
+}
+
+.compact-trade-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.compact-trade-form button {
+  grid-column: 1 / -1;
+}
+
+.focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.button.secondary {
+  background: rgba(245, 182, 103, 0.14);
+  color: var(--warning);
+  font-weight: 700;
+}
+
 @media (max-width: 1260px) {
   .metrics-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .content-grid,
+  .cockpit-grid,
+  .focus-grid,
   .builder-grid,
   .launch-brief-grid,
   .market-context-grid,
@@ -1031,10 +1192,21 @@ th:last-child {
   .terminal-delta .mini-metrics {
     grid-template-columns: 1fr;
   }
+
+  .control-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .market-cockpit-card {
+    min-height: auto;
+  }
 }
 
 @media (max-width: 900px) {
   .hero,
+  .terminal-hero,
+  .control-status,
+  .cockpit-kpis,
   .toolbar,
   .builder-grid,
   .operator-grid,
@@ -1059,6 +1231,10 @@ th:last-child {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hero-chart {
+    min-height: 310px;
   }
 
   .split-list {

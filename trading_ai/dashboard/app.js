@@ -101,6 +101,26 @@ function number(value, digits = 2) {
   return Number(value ?? 0).toFixed(digits);
 }
 
+function updateManualStopFromMarket(force = false) {
+  const latestPrice = Number(state.overview?.market?.latest_price || 0);
+  if (!latestPrice || !elements.manualStopLossInput || !elements.manualSideSelect) {
+    return;
+  }
+  const side = elements.manualSideSelect.value;
+  const stopPrice = side === "sell" ? latestPrice * 1.015 : latestPrice * 0.985;
+  const currentValue = Number(elements.manualStopLossInput.value || 0);
+  const shouldUpdate =
+    force ||
+    !currentValue ||
+    elements.manualStopLossInput.dataset.autoStop === "true" ||
+    Math.abs(currentValue - 95000) < 0.01;
+  if (!shouldUpdate) {
+    return;
+  }
+  elements.manualStopLossInput.value = stopPrice.toFixed(2);
+  elements.manualStopLossInput.dataset.autoStop = "true";
+}
+
 function setText(id, value, className = "") {
   const node = document.getElementById(id);
   node.textContent = value;
@@ -1306,6 +1326,7 @@ function renderOverview(overview) {
   setText("ema50-value", money(features.ema_50));
   setText("ema200-value", money(features.ema_200));
   setText("rsi-value", number(features.rsi_14, 1));
+  updateManualStopFromMarket();
 
   const priceSeries = market.recent_bars.map((bar) => ({ value: bar.close }));
   document.getElementById("price-chart").innerHTML = chartSvg(priceSeries, "#73d5b2");
@@ -1401,6 +1422,7 @@ async function submitManualOrder(event) {
         quantity: Number(elements.manualQuantityInput.value),
         stop_loss_price: Number(elements.manualStopLossInput.value),
         take_profit_price: takeProfit ? Number(takeProfit) : null,
+        rationale: "Operator-triggered 5-minute paper drill. Paper only; no live capital.",
       }),
     });
     elements.cycleStatus.textContent = `${result.report.status} manual order for ${result.order.symbol}.`;
@@ -1748,10 +1770,15 @@ elements.strategyBacktestButton.addEventListener("click", backtestStrategy);
 elements.edgeScanButton.addEventListener("click", runEdgeScan);
 elements.terminalSnapshotButton.addEventListener("click", saveTerminalSnapshot);
 elements.profitHunterButton.addEventListener("click", runProfitHunter);
+elements.manualStopLossInput.addEventListener("input", () => {
+  elements.manualStopLossInput.dataset.autoStop = "false";
+});
+elements.manualSideSelect.addEventListener("change", () => updateManualStopFromMarket(true));
 
 window.addEventListener("load", () => {
   elements.jobSymbolInput.value = state.symbol;
   elements.manualSymbolInput.value = state.symbol;
+  elements.manualStopLossInput.dataset.autoStop = "true";
   refresh();
   window.setInterval(refresh, 15000);
 });
